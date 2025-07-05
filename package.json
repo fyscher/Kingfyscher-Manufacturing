@@ -1,0 +1,20 @@
+{
+  "name": "kingfyscher-manufacturing",
+  "version": "1.0.0",
+  "description": "Source code for Kingfyscher Manufacturing",
+  "homepage": "https://github.com/fyscher/Kingfyscher-Manufacturing#readme",
+  "bugs": {
+    "url": "https://github.com/fyscher/Kingfyscher-Manufacturing/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/fyscher/Kingfyscher-Manufacturing.git"
+  },
+  "license": "ISC",
+  "author": "Fyscher Kraal",
+  "type": "commonjs",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  }
+}
