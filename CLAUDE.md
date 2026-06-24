@@ -34,14 +34,16 @@ The app reads from environment variables (no `.env` file committed). Required va
 
 **Entry point split**: `index.js` only binds the port; `app.js` wires up Express, Mongoose, and all middleware. Tests import `app.js` directly via supertest, so the server never binds a port during test runs.
 
-**Request flow**: `tokenExtractor` middleware (in `middleware.js`) runs on every request and attaches `req.token` from the `Authorization: Bearer <token>` header. The `userExtractor` middleware is available but not globally applied — controllers requiring auth must apply it individually. `errorHandler` at the tail of `app.js` normalises Mongoose, JWT, and duplicate-key errors into JSON responses.
+**Request flow**: `tokenExtractor` middleware (in `middleware.js` at project root) runs on every request and attaches `req.token` from the `Authorization: Bearer <token>` header. The `userExtractor` middleware is applied per-route to endpoints requiring auth (GET and DELETE on `/api/users`). `errorHandler` at the tail of `app.js` normalises Mongoose, JWT, and duplicate-key errors into JSON responses.
 
-**Auth**: Login (`POST /api/login`) returns a JWT signed with `process.env.SECRET`, expiring in 1 hour. Passwords are hashed with bcrypt (10 salt rounds).
+**Auth**: Login (`POST /api/login`) returns a JWT signed with `config.SECRET` (centralised in `utils/config.js`), expiring in 1 hour. Passwords are hashed with bcrypt (10 salt rounds).
 
 **Controllers**:
-- `controllers/users.js` — user CRUD (`POST /api/users`, `GET /api/users`, `DELETE /api/users/:id`)
+- `controllers/users.js` — user CRUD (`POST /api/users` open for registration, `GET /api/users` and `DELETE /api/users/:id` require auth via `userExtractor`)
 - `controllers/login.js` — issues JWTs (`POST /api/login`)
-- `controllers/upland_api.js` — stub/placeholder for Upland game API integration (currently empty)
+- `controllers/upland_api.js` — stub router for future Upland game API integration
+
+**Frontend**: `public/` contains a vanilla JS SPA (login, dashboard, user management). Served via `express.static` in `app.js`.
 
 **Testing**: Uses Node's built-in `node:test` + `node:assert` with supertest. Tests hit a real MongoDB (via `TEST_MONGODB_URI`), not mocks. `tests/test_helper.js` holds seed fixtures and a `usersInDb()` helper reused across test files.
 

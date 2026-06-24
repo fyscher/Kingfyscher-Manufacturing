@@ -1,4 +1,5 @@
 const express = require("express");
+const path = require("path");
 const app = express();
 const config = require("./utils/config");
 const usersRouter = require("./controllers/users");
@@ -10,12 +11,13 @@ const cors = require("cors");
 
 morgan.token("body", (req) => JSON.stringify(req.body));
 
+app.use(cors());
 app.use(
   morgan(":method :url :status :res[content-length] - :response-time ms :body"),
 );
-app.use(middleware.tokenExtractor);
+app.use(express.static(path.join(__dirname, "public")));
 app.use(express.json());
-app.use(cors());
+app.use(middleware.tokenExtractor);
 
 app.use("/api/users", usersRouter);
 app.use("/api/login", loginRouter);

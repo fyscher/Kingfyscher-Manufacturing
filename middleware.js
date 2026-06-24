@@ -1,5 +1,6 @@
 const User = require('./models/user')
 const jwt = require('jsonwebtoken')
+const config = require('./utils/config')
 
 const tokenExtractor = async (req, res, next) =>
 {
@@ -12,17 +13,13 @@ const tokenExtractor = async (req, res, next) =>
 
 const userExtractor = async (req, res, next) =>
 {
-  const decodedToken = jwt.verify(req.token, process.env.SECRET)
-  console.log('decodedToken: ', decodedToken)
+  const decodedToken = jwt.verify(req.token, config.SECRET)
   const user = await User.findById(decodedToken.id)
+  if (!user) {
+    return res.status(401).json({ error: 'user not found' })
+  }
   req.user = user.toJSON()
   next()
-}
-
-const usersInDb = async () =>
-{
-    const users = await User.find({})
-    return users.map(u => u.toJSON())
 }
 
 const errorHandler = (error, req, res, next) =>
@@ -45,4 +42,4 @@ const errorHandler = (error, req, res, next) =>
   next(error)
 }
 
-module.exports = { tokenExtractor, userExtractor, errorHandler, usersInDb }
+module.exports = { tokenExtractor, userExtractor, errorHandler }
