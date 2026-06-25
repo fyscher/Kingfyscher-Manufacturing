@@ -36,6 +36,24 @@ const api = {
       headers: { Authorization: `Bearer ${token}` },
     });
   },
+
+  getCities() {
+    return fetch('/api/upland/cities').then(r => r.json());
+  },
+
+  getRecentPurchases(limit = 15) {
+    return fetch(`/api/upland/appchain/purchases?limit=${limit}`).then(r => r.json());
+  },
+
+  searchProperties(cityId, textSearch) {
+    const params = new URLSearchParams({ cityId, currentPage: 1, pageSize: 20 });
+    if (textSearch) params.set('textSearch', textSearch);
+    return fetch(`/api/upland/properties?${params}`).then(r => r.json());
+  },
+
+  getPropertyPurchases(propertyId) {
+    return fetch(`/api/upland/appchain/purchases/property/${propertyId}?limit=10`).then(r => r.json());
+  },
 };
 
 /* ── State ───────────────────────────────────────────────── */
@@ -310,9 +328,183 @@ modalConfirm.addEventListener('click', async () => {
   }
 });
 
+/* ── Upland: DOM refs ────────────────────────────────────── */
+const purchasesBody     = $('purchases-body');
+const citiesBody        = $('cities-body');
+const citiesCount       = $('cities-count');
+const searchCity        = $('search-city');
+const searchForm        = $('property-search-form');
+const propertyResults   = $('property-results');
+const refreshPurchases  = $('refresh-purchases');
+const statUpland        = $('stat-upland');
+const uplandStatusText  = $('upland-status-text');
+const uplandStatusPill  = $('upland-status-pill');
+
+/* ── Upland: Load cities ─────────────────────────────────── */
+async function loadCities() {
+  try {
+    const data = await api.getCities();
+    const cities = data.cities || [];
+    state.cities = cities;
+    citiesCount.textContent = cities.length;
+    statUpland.textContent = 'Connected';
+    uplandStatusText.textContent = 'API Connected';
+    uplandStatusPill.className = 'status-pill status-pill--online';
+
+    citiesBody.innerHTML = cities
+      .sort((a, b) => a.name.localeCompare(b.name))
+      .map(c => `
+        <tr>
+          <td>${escHtml(c.name)}</td>
+          <td>${escHtml(c.stateName || '')}</td>
+          <td>${escHtml(c.countryName || '')}</td>
+        </tr>
+      `).join('');
+
+    searchCity.innerHTML = '<option value="">Select a city</option>' +
+      cities
+        .sort((a, b) => a.name.localeCompare(b.name))
+        .map(c => `<option value="${c.id}">${escHtml(c.name)}</option>`)
+        .join('');
+  } catch {
+    statUpland.textContent = 'Error';
+    uplandStatusText.textContent = 'Connection Error';
+    uplandStatusPill.className = 'status-pill status-pill--warning';
+  }
+}
+
+/* ── Upland: Load recent purchases ───────────────────────── */
+async function loadPurchases() {
+  purchasesBody.innerHTML = '<tr class="table-empty"><td colspan="4">Loading...</td></tr>';
+  try {
+    const data = await api.getRecentPurchases(15);
+    const purchases = data.purchases || [];
+    if (purchases.length === 0) {
+      purchasesBody.innerHTML = '<tr class="table-empty"><td colspan="4">No recent purchases</td></tr>';
+      return;
+    }
+    purchasesBody.innerHTML = purchases.map(p => {
+      const time = new Date(p.purchasedAt).toLocaleTimeString();
+      return `
+        <tr class="purchase-row" data-prop-id="${escHtml(String(p.propertyId))}" style="cursor:pointer" title="Click to view property history">
+          <td><span class="id-chip">${escHtml(String(p.propertyId))}</span></td>
+          <td>—</td>
+          <td>${Number(p.priceUpx).toLocaleString()}</td>
+          <td>${escHtml(time)}</td>
+        </tr>
+      `;
+    }).join('');
+
+    enrichPurchaseRows(purchases);
+  } catch {
+    purchasesBody.innerHTML = '<tr class="table-empty"><td colspan="4">Failed to load</td></tr>';
+  }
+}
+
+async function enrichPurchaseRows(purchases) {
+  const seen = new Set();
+  for (const p of purchases) {
+    const pid = String(p.propertyId);
+    if (seen.has(pid)) continue;
+    seen.add(pid);
+    try {
+      const prop = await fetch(`/api/upland/properties/${pid}`).then(r => r.json());
+      document.querySelectorAll(`tr[data-prop-id="${pid}"]`).forEach(row => {
+        row.children[0].innerHTML = `<span class="id-chip">${escHtml(prop.address || pid)}</span>`;
+        row.children[1].textContent = prop.city?.name || '—';
+      });
+    } catch { /* skip */ }
+  }
+}
+
+/* ── Upland: Property search ─────────────────────────────── */
+searchForm.addEventListener('submit', async e => {
+  e.preventDefault();
+  const cityId = searchCity.value;
+  const text = $('search-address').value.trim();
+  if (!cityId) return;
+
+  propertyResults.innerHTML = '<p style="color:var(--text-muted)">Searching...</p>';
+  try {
+    const data = await api.searchProperties(cityId, text);
+    const results = data.results || [];
+    if (results.length === 0) {
+      propertyResults.innerHTML = '<p style="color:var(--text-muted)">No properties found</p>';
+      return;
+    }
+    propertyResults.innerHTML = `
+      <table class="table">
+        <thead>
+          <tr><th>Address</th><th>Neighborhood</th><th>Status</th><th>Mint Price</th></tr>
+        </thead>
+        <tbody>
+          ${results.map(p => `
+            <tr class="purchase-row" data-prop-id="${p.id}" style="cursor:pointer" title="Click to view purchase history">
+              <td>${escHtml(p.address)}</td>
+              <td>${escHtml(p.neighborhood?.name || '—')}</td>
+              <td><span class="badge badge--${p.status === 'Owned' ? 'muted' : p.status === 'For sale' ? 'warning' : 'muted'}">${escHtml(p.status)}</span></td>
+              <td>${p.mintPrice ? Number(p.mintPrice).toLocaleString() + ' UPX' : '—'}</td>
+            </tr>
+          `).join('')}
+        </tbody>
+      </table>
+    `;
+  } catch {
+    propertyResults.innerHTML = '<p style="color:var(--danger)">Search failed</p>';
+  }
+});
+
+/* ── Upland: Click property row to view history ──────────── */
+document.addEventListener('click', async e => {
+  const row = e.target.closest('.purchase-row[data-prop-id]');
+  if (!row) return;
+  const propId = row.dataset.propId;
+
+  propertyResults.innerHTML = `<p style="color:var(--text-muted)">Loading purchase history for property ${escHtml(propId)}...</p>`;
+  navigateTo('upland');
+
+  try {
+    const data = await api.getPropertyPurchases(propId);
+    const prop = data.property;
+    const purchases = data.purchases || [];
+
+    let html = '';
+    if (prop) {
+      html += `<div class="card" style="margin-bottom:1rem"><div class="card-body">
+        <strong>${escHtml(prop.address)}</strong> &mdash; ${escHtml(prop.city?.name || '')}${prop.neighborhood?.name ? ', ' + escHtml(prop.neighborhood.name) : ''}
+        <br>Status: <span class="badge badge--${prop.status === 'Owned' ? 'muted' : 'warning'}">${escHtml(prop.status)}</span>
+        &nbsp; Mint: ${prop.mintPrice ? Number(prop.mintPrice).toLocaleString() + ' UPX' : '—'}
+      </div></div>`;
+    }
+
+    if (purchases.length === 0) {
+      html += '<p style="color:var(--text-muted)">No on-chain purchase records found in recent history</p>';
+    } else {
+      html += `<table class="table"><thead><tr><th>Buyer (EOS)</th><th>Price</th><th>Date</th></tr></thead><tbody>
+        ${purchases.map(p => `
+          <tr>
+            <td><span class="id-chip">${escHtml(p.buyerEos)}</span></td>
+            <td>${Number(p.priceUpx).toLocaleString()} UPX</td>
+            <td>${new Date(p.purchasedAt).toLocaleString()}</td>
+          </tr>
+        `).join('')}
+      </tbody></table>`;
+    }
+    propertyResults.innerHTML = html;
+  } catch {
+    propertyResults.innerHTML = '<p style="color:var(--danger)">Failed to load property history</p>';
+  }
+});
+
+/* ── Upland: Refresh purchases ───────────────────────────── */
+refreshPurchases.addEventListener('click', loadPurchases);
+
 /* ── Init ────────────────────────────────────────────────── */
 if (state.token) {
   showApp();
 } else {
   showAuth();
 }
+
+loadCities();
+loadPurchases();

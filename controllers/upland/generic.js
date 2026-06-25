@@ -7,7 +7,13 @@ genericRouter.get("/cities", async (req, res) => {
 });
 
 genericRouter.get("/properties", async (req, res) => {
-  const result = await uplandFetch("/properties");
+  const qs = new URLSearchParams(req.query).toString();
+  const result = await uplandFetch(`/properties${qs ? `?${qs}` : ""}`);
+  res.json(result);
+});
+
+genericRouter.get("/properties/:propertyId", async (req, res) => {
+  const result = await uplandFetch(`/properties/${req.params.propertyId}`);
   res.json(result);
 });
 

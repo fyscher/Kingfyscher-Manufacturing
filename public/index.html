@@ -150,7 +150,7 @@
             </div>
             <div class="stat-content">
               <span class="stat-label">Upland API</span>
-              <span class="stat-value stat-value--sm">Pending</span>
+              <span class="stat-value stat-value--sm" id="stat-upland">Checking...</span>
             </div>
           </div>
           <div class="stat-card">
@@ -284,82 +284,80 @@
         <div class="page-header">
           <div>
             <h2 class="page-title">Upland API</h2>
-            <p class="page-subtitle">Manage your Upland game integration</p>
+            <p class="page-subtitle">Live data from the Upland ecosystem</p>
           </div>
-          <div class="status-pill status-pill--warning">
+          <div class="status-pill status-pill--online" id="upland-status-pill">
             <span class="status-dot"></span>
-            Integration Pending
+            <span id="upland-status-text">Checking...</span>
           </div>
         </div>
 
-        <div class="upland-layout">
+        <!-- Property Search -->
+        <div class="card" style="margin-bottom:1.25rem">
+          <div class="card-header">
+            <h3 class="card-title">Property Search</h3>
+          </div>
+          <div class="card-body">
+            <form id="property-search-form" class="inline-form">
+              <div class="field">
+                <label for="search-city">City</label>
+                <select id="search-city" required>
+                  <option value="">Loading cities...</option>
+                </select>
+              </div>
+              <div class="field">
+                <label for="search-address">Address</label>
+                <input type="text" id="search-address" placeholder="Search by address...">
+              </div>
+              <button type="submit" class="btn btn--primary">Search</button>
+            </form>
+            <div id="property-results" style="margin-top:1rem"></div>
+          </div>
+        </div>
+
+        <div class="content-grid">
+          <!-- Recent Purchases -->
           <div class="card">
             <div class="card-header">
-              <h3 class="card-title">Connection Status</h3>
+              <h3 class="card-title">Recent Property Purchases</h3>
+              <button class="btn btn--ghost btn--sm" id="refresh-purchases">Refresh</button>
             </div>
-            <div class="card-body">
-              <div class="connection-block">
-                <div class="connection-orb">
-                  <svg viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg">
-                    <circle cx="24" cy="24" r="23" stroke="#1e1e35" stroke-width="2"/>
-                    <path d="M14 24l7 7 13-14" stroke="#f59e0b" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" opacity="0.35"/>
-                  </svg>
-                </div>
-                <div>
-                  <p class="conn-label">Upland Appchain</p>
-                  <p class="conn-value">Not configured</p>
-                </div>
-              </div>
-              <div class="divider"></div>
-              <div class="info-list">
-                <div class="info-row">
-                  <span class="info-key">Shop ID</span>
-                  <span class="info-val mono">ENV: DEVSHOPID</span>
-                </div>
-                <div class="info-row">
-                  <span class="info-key">API Base</span>
-                  <span class="info-val mono">ENV: UPLAND_URI</span>
-                </div>
-                <div class="info-row">
-                  <span class="info-key">Environment</span>
-                  <span class="info-val"><span class="badge badge--warning">Sandbox</span></span>
-                </div>
-              </div>
+            <div class="card-body card-body--flush">
+              <table class="table">
+                <thead>
+                  <tr>
+                    <th>Property</th>
+                    <th>City</th>
+                    <th>Price (UPX)</th>
+                    <th>Time</th>
+                  </tr>
+                </thead>
+                <tbody id="purchases-body">
+                  <tr class="table-empty"><td colspan="4">Loading...</td></tr>
+                </tbody>
+              </table>
             </div>
           </div>
 
-          <div class="features-grid">
-            <div class="feature-card">
-              <div class="feature-icon feature-icon--primary">
-                <svg viewBox="0 0 20 20" fill="currentColor"><path d="M4 4a2 2 0 00-2 2v1h16V6a2 2 0 00-2-2H4zM18 9H2v5a2 2 0 002 2h12a2 2 0 002-2V9zM4 13a1 1 0 011-1h1a1 1 0 110 2H5a1 1 0 01-1-1zm5-1a1 1 0 100 2h1a1 1 0 100-2H9z"/></svg>
-              </div>
-              <h4>UPX / SPARK</h4>
-              <p>Token balance tracking and transfer management for UPX, SPARK, and SPARKLET</p>
-              <span class="badge badge--muted">Coming Soon</span>
+          <!-- Cities -->
+          <div class="card">
+            <div class="card-header">
+              <h3 class="card-title">Cities</h3>
+              <span class="badge" id="cities-count">0</span>
             </div>
-            <div class="feature-card">
-              <div class="feature-icon feature-icon--accent">
-                <svg viewBox="0 0 20 20" fill="currentColor"><path d="M7 3a1 1 0 000 2h6a1 1 0 000-2H7zM4 7a1 1 0 011-1h10a1 1 0 110 2H5a1 1 0 01-1-1zM2 11a2 2 0 012-2h12a2 2 0 012 2v4a2 2 0 01-2 2H4a2 2 0 01-2-2v-4z"/></svg>
-              </div>
-              <h4>NFT Marketplace</h4>
-              <p>List and manage NFT assets across the Upland ecosystem and Appchain</p>
-              <span class="badge badge--muted">Coming Soon</span>
-            </div>
-            <div class="feature-card">
-              <div class="feature-icon feature-icon--success">
-                <svg viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M5 9V7a5 5 0 0110 0v2a2 2 0 012 2v5a2 2 0 01-2 2H5a2 2 0 01-2-2v-5a2 2 0 012-2zm8-2v2H7V7a3 3 0 016 0z" clip-rule="evenodd"/></svg>
-              </div>
-              <h4>Auth Flow</h4>
-              <p>Upland user mapping, authentication flows, and third-party integration</p>
-              <span class="badge badge--muted">Coming Soon</span>
-            </div>
-            <div class="feature-card">
-              <div class="feature-icon feature-icon--warning">
-                <svg viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clip-rule="evenodd"/></svg>
-              </div>
-              <h4>Webhooks</h4>
-              <p>Real-time event notifications and webhook handling from the Upland platform</p>
-              <span class="badge badge--muted">Coming Soon</span>
+            <div class="card-body card-body--flush" style="max-height:400px;overflow-y:auto">
+              <table class="table">
+                <thead>
+                  <tr>
+                    <th>Name</th>
+                    <th>State</th>
+                    <th>Country</th>
+                  </tr>
+                </thead>
+                <tbody id="cities-body">
+                  <tr class="table-empty"><td colspan="3">Loading...</td></tr>
+                </tbody>
+              </table>
             </div>
           </div>
         </div>
