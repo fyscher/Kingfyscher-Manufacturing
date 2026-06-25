@@ -1,10 +1,9 @@
 const express = require("express");
 const path = require("path");
 const app = express();
-const config = require("./utils/config");
 const usersRouter = require("./controllers/users");
 const loginRouter = require("./controllers/login");
-const mongoose = require("mongoose");
+const uplandRouter = require("./controllers/upland_api");
 const middleware = require("./middleware");
 const morgan = require("morgan");
 const cors = require("cors");
@@ -21,16 +20,7 @@ app.use(middleware.tokenExtractor);
 
 app.use("/api/users", usersRouter);
 app.use("/api/login", loginRouter);
-
-mongoose.set("strictQuery", false);
-mongoose
-  .connect(config.MONGODB_URI)
-  .then(() => {
-    console.log("MongoDB connection successful");
-  })
-  .catch((error) => {
-    console.error("Connection Error: ", error, error.message);
-  });
+app.use("/api/upland", uplandRouter);
 
 app.use(middleware.errorHandler);
 

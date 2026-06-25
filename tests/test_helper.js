@@ -1,6 +1,6 @@
 const User = require('../models/user')
 
-const Fyscher = 
+const Fyscher =
 {
     "username": "fyscher",
     "name": "fyscher",
@@ -16,11 +16,10 @@ const Fyschman =
 
 const usersInDb = async () =>
 {
-    const users = await User.find({})
-    return users.map(u => u.toJSON())
+    return await User.find()
 }
 
-module.exports = 
+module.exports =
 {
     usersInDb,
     Fyscher,

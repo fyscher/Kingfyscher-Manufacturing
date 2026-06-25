@@ -21,27 +21,36 @@ The app reads from environment variables (no `.env` file committed). Required va
 | Variable | Purpose |
 |---|---|
 | `PORT` | HTTP server port |
-| `MONGODB_URI` | Production MongoDB connection string |
-| `TEST_MONGODB_URI` | MongoDB URI used when `NODE_ENV=test` |
 | `SECRET` | JWT signing secret |
+| `SUPABASE_URL` | Supabase project URL |
+| `SUPABASE_KEY` | Supabase service role key |
 | `DEVSHOPID` | Upland API shop ID |
 | `KFM_PASSWORD` | Upland API password |
 | `UPLAND_URI` | Upland API base URL |
 
-`utils/config.js` centralises all env var reads and switches `MONGODB_URI` to `TEST_MONGODB_URI` automatically when `NODE_ENV=test`.
+`utils/config.js` centralises all env var reads. A `.env` file (gitignored) is loaded via `--env-file` in the start script.
 
 ## Architecture
 
-**Entry point split**: `index.js` only binds the port; `app.js` wires up Express, Mongoose, and all middleware. Tests import `app.js` directly via supertest, so the server never binds a port during test runs.
+**Entry point split**: `index.js` only binds the port; `app.js` wires up Express and all middleware. Tests import `app.js` directly via supertest, so the server never binds a port during test runs.
 
-**Request flow**: `tokenExtractor` middleware (in `middleware.js` at project root) runs on every request and attaches `req.token` from the `Authorization: Bearer <token>` header. The `userExtractor` middleware is applied per-route to endpoints requiring auth (GET and DELETE on `/api/users`). `errorHandler` at the tail of `app.js` normalises Mongoose, JWT, and duplicate-key errors into JSON responses.
+**Database**: Supabase (PostgreSQL). Client initialised in `utils/supabase.js`. The `models/user.js` module exports query helpers (`findById`, `findOne`, `find`, `create`, `update`, `findByIdAndDelete`, `deleteMany`) that wrap Supabase queries with camelCase ↔ snake_case field mapping and sensitive field stripping.
+
+**Request flow**: `tokenExtractor` middleware (in `middleware.js` at project root) runs on every request and attaches `req.token` from the `Authorization: Bearer <token>` header. The `userExtractor` middleware is applied per-route to endpoints requiring auth (GET and DELETE on `/api/users`). `errorHandler` at the tail of `app.js` normalises PostgreSQL constraint violations, JWT, and other errors into JSON responses.
 
 **Auth**: Login (`POST /api/login`) returns a JWT signed with `config.SECRET` (centralised in `utils/config.js`), expiring in 1 hour. Passwords are hashed with bcrypt (10 salt rounds).
 
 **Controllers**:
 - `controllers/users.js` — user CRUD (`POST /api/users` open for registration, `GET /api/users` and `DELETE /api/users/:id` require auth via `userExtractor`)
 - `controllers/login.js` — issues JWTs (`POST /api/login`)
-- `controllers/upland_api.js` — stub router for future Upland game API integration
+- `controllers/upland_api.js` — main Upland API router, mounts sub-routers from `controllers/upland/`
+  - `upland/auth.js` — `POST /api/upland/auth/init` (generate OTP code) + `POST /api/upland/auth/webhooks` (receive Upland callbacks)
+  - `upland/generic.js` — proxy to Upland read endpoints (cities, properties, tracks, collections, neighborhoods, treasures-history, buildings)
+  - `upland/user.js` — per-user endpoints (profile, NFTs, balances, properties) requiring connected Upland account
+  - `upland/escrow.js` — escrow container lifecycle (create, get, refresh, lock, resolve, refund, delete transaction)
+  - `upland/tournaments.js` — tournament lifecycle (settings, create, join, close registration, start, scores, resolve, cancel)
+
+**Upland API Integration**: Uses `utils/uplandClient.js` which provides `uplandFetch` (Basic Auth with `DEVSHOPID`/`KFM_PASSWORD`) and `uplandUserFetch` (Bearer token for per-user calls). User auth flow: app generates OTP code via `/auth/otp/init`, user enters code in Upland, webhook delivers JWT access token which is stored on the User model.
 
 **Frontend**: `public/` contains a vanilla JS SPA (login, dashboard, user management). Served via `express.static` in `app.js`.
 

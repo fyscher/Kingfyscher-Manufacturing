@@ -18,22 +18,21 @@ const userExtractor = async (req, res, next) =>
   if (!user) {
     return res.status(401).json({ error: 'user not found' })
   }
-  req.user = user.toJSON()
+  req.user = user
   next()
 }
 
 const errorHandler = (error, req, res, next) =>
 {
+  if (error.code === '23505') {
+    return res.status(400).json({ error: error.message })
+  }
+  if (error.code === '23514') {
+    return res.status(400).json({ error: error.message })
+  }
+
   switch (error.name)
   {
-    case 'CastError':
-      return res.status(400).json({ error: 'Malformatted Id' })
-    case 'ValidationError':
-      return res.status(400).json({ error: error.message })
-    case 'MongoServerError':
-      return error.errmsg.includes('E11000 duplicate key error collection')
-      ? res.status(400).json({ error: error.message })
-      : res.status(400).json({ error: 'Mongojs Server Error' })
     case 'JsonWebTokenError':
       return res.status(401).json({ error: 'invalid token' })
     case 'TokenExpiredError':
