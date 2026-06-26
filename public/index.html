@@ -79,6 +79,12 @@
           </svg>
           Upland API
         </a>
+        <a class="nav-item" data-section="market">
+          <svg class="nav-icon" viewBox="0 0 20 20" fill="currentColor">
+            <path d="M2 11a1 1 0 011-1h2a1 1 0 011 1v5a1 1 0 01-1 1H3a1 1 0 01-1-1v-5zm6-4a1 1 0 011-1h2a1 1 0 011 1v9a1 1 0 01-1 1H9a1 1 0 01-1-1V7zm6-3a1 1 0 011-1h2a1 1 0 011 1v12a1 1 0 01-1 1h-2a1 1 0 01-1-1V4z"/>
+          </svg>
+          Structure Market
+        </a>
       </nav>
 
       <div class="sidebar-footer">
@@ -349,6 +355,123 @@
             </div>
           </div>
         </div>
+      </section>
+
+      <!-- Structure Market -->
+      <section id="section-market" class="section">
+        <div class="page-header">
+          <div>
+            <h2 class="page-title">Structure Market</h2>
+            <p class="page-subtitle">Browse recent on-chain property sales and current market pricing</p>
+          </div>
+        </div>
+
+        <!-- Search Form -->
+        <div class="card" style="margin-bottom:1.25rem">
+          <div class="card-header">
+            <h3 class="card-title">Search by Structure Type</h3>
+          </div>
+          <div class="card-body">
+            <form id="market-search-form" class="inline-form">
+              <div class="field" style="min-width:220px;flex:2">
+                <label for="market-type">Time Period</label>
+                <select id="market-type">
+                  <option value="">Loading periods...</option>
+                </select>
+              </div>
+              <div class="field" style="min-width:180px;flex:1">
+                <label for="market-city">City (optional)</label>
+                <select id="market-city">
+                  <option value="">All cities</option>
+                </select>
+              </div>
+              <button type="submit" class="btn btn--primary" id="market-search-btn">
+                <span class="btn-text">Search Market</span>
+                <span class="btn-spinner hidden"></span>
+              </button>
+            </form>
+            <div id="market-error" class="alert alert--error hidden" style="margin-top:0.75rem"></div>
+          </div>
+        </div>
+
+        <!-- Market Results (hidden until search) -->
+        <div id="market-results" class="hidden">
+
+          <!-- Key Metrics -->
+          <div class="market-metrics">
+            <div class="market-metric market-metric--floor">
+              <div class="metric-label">Lowest Sale</div>
+              <div class="metric-value metric-value--floor" id="metric-floor">—</div>
+              <div class="metric-sub">Cheapest in period</div>
+            </div>
+            <div class="market-metric">
+              <div class="metric-label">Sales in Period</div>
+              <div class="metric-value" id="metric-count">—</div>
+              <div class="metric-sub">On-chain purchases</div>
+            </div>
+            <div class="market-metric market-metric--last-sold">
+              <div class="metric-label">Last Sold (chain)</div>
+              <div class="metric-value metric-value--last" id="metric-last-sold">—</div>
+              <div class="metric-sub" id="metric-last-sold-date">from blockchain history</div>
+            </div>
+          </div>
+
+          <!-- Current Listings Table -->
+          <div class="card" style="margin-bottom:1.25rem">
+            <div class="card-header">
+              <h3 class="card-title">Sales in Period</h3>
+              <span class="badge" id="listings-count-badge">0</span>
+            </div>
+            <div class="card-body card-body--flush" style="max-height:420px;overflow-y:auto">
+              <table class="table">
+                <thead>
+                  <tr>
+                    <th>#</th>
+                    <th>Property</th>
+                    <th>City</th>
+                    <th>Buyer (EOS)</th>
+                    <th style="text-align:right">Price (UPX)</th>
+                  </tr>
+                </thead>
+                <tbody id="listings-body">
+                  <tr class="table-empty"><td colspan="5">Select a period and search to see sales</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <!-- Recent Sales from Blockchain -->
+          <div class="card">
+            <div class="card-header">
+              <h3 class="card-title">Recent Blockchain Sales</h3>
+              <span class="badge" id="sales-count-badge">0</span>
+            </div>
+            <div class="card-body card-body--flush" style="max-height:360px;overflow-y:auto">
+              <table class="table">
+                <thead>
+                  <tr>
+                    <th>Transaction</th>
+                    <th>Price (UPX)</th>
+                    <th>Date</th>
+                  </tr>
+                </thead>
+                <tbody id="sales-history-body">
+                  <tr class="table-empty"><td colspan="3">Loading blockchain history...</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+        </div>
+
+        <!-- Empty state before first search -->
+        <div id="market-empty-state" style="text-align:center;padding:4rem 1rem;color:var(--text-muted)">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="width:48px;height:48px;margin:0 auto 1rem;opacity:0.3">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M3 13.125C3 12.504 3.504 12 4.125 12h2.25c.621 0 1.125.504 1.125 1.125v6.75C7.5 20.496 6.996 21 6.375 21h-2.25A1.125 1.125 0 013 19.875v-6.75zM9.75 8.625c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125v11.25c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 01-1.125-1.125V8.625zM16.5 4.125c0-.621.504-1.125 1.125-1.125h2.25C20.496 3 21 3.504 21 4.125v15.75c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 01-1.125-1.125V4.125z"/>
+          </svg>
+          <p style="font-size:0.875rem">Select a time period and search to see on-chain sales data</p>
+        </div>
+
       </section>
 
     </main>

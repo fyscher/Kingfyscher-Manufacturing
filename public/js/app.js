@@ -499,6 +499,164 @@ document.addEventListener('click', async e => {
 /* ── Upland: Refresh purchases ───────────────────────────── */
 refreshPurchases.addEventListener('click', loadPurchases);
 
+/* ── Structure Market: API ───────────────────────────────── */
+const marketApi = {
+  getTypes() {
+    return fetch('/api/upland/structures/types').then(r => r.json());
+  },
+  getMarket(buildingTypeId, cityId) {
+    const params = new URLSearchParams({ buildingTypeId });
+    if (cityId) params.set('cityId', cityId);
+    return fetch(`/api/upland/structures/market?${params}`).then(r => r.json());
+  },
+  getSalesHistory() {
+    return fetch('/api/upland/structures/sales-history?limit=30').then(r => r.json());
+  },
+};
+
+/* ── Structure Market: DOM refs ──────────────────────────── */
+const marketTypeSelect    = $('market-type');
+const marketCitySelect    = $('market-city');
+const marketSearchForm    = $('market-search-form');
+const marketSearchBtn     = $('market-search-btn');
+const marketError         = $('market-error');
+const marketResults       = $('market-results');
+const marketEmptyState    = $('market-empty-state');
+const metricFloor         = $('metric-floor');
+const metricCount         = $('metric-count');
+const metricLastSold      = $('metric-last-sold');
+const metricLastSoldDate  = $('metric-last-sold-date');
+const listingsBody        = $('listings-body');
+const listingsCountBadge  = $('listings-count-badge');
+const salesHistoryBody    = $('sales-history-body');
+const salesCountBadge     = $('sales-count-badge');
+
+/* ── Structure Market: Load types ────────────────────────── */
+async function loadStructureTypes() {
+  try {
+    const data = await marketApi.getTypes();
+    const types = data.types || [];
+    if (types.length === 0) {
+      marketTypeSelect.innerHTML = '<option value="">No periods available</option>';
+      return;
+    }
+    marketTypeSelect.innerHTML = '<option value="">Select a time period</option>' +
+      types.map(t => `<option value="${t.id}">${escHtml(t.name)}</option>`).join('');
+  } catch {
+    marketTypeSelect.innerHTML = '<option value="">Failed to load types</option>';
+  }
+}
+
+/* ── Structure Market: Populate city filter ──────────────── */
+function populateMarketCities(cities) {
+  marketCitySelect.innerHTML = '<option value="">All cities</option>' +
+    cities
+      .sort((a, b) => a.name.localeCompare(b.name))
+      .map(c => `<option value="${c.id}">${escHtml(c.name)}</option>`)
+      .join('');
+}
+
+/* ── Structure Market: Render listings ───────────────────── */
+function renderListings(listings) {
+  listingsCountBadge.textContent = listings.length;
+  if (listings.length === 0) {
+    listingsBody.innerHTML = '<tr class="table-empty"><td colspan="5">No listings found for this structure type</td></tr>';
+    return;
+  }
+  listingsBody.innerHTML = listings.map((b, i) => {
+    const name = b.address || b.buildingType?.name || b.type?.name || b.name || b.propertyId || '—';
+    const city = b.city?.name || b.property?.city?.name || '—';
+    const owner = b.owner || b.ownerEosId || b.sellerEosId || '—';
+    const price = b.price != null ? Number(b.price).toLocaleString() : '—';
+    const isFloor = i === 0;
+    return `
+      <tr>
+        <td style="color:var(--text-muted);font-size:0.75rem">${i + 1}</td>
+        <td style="font-weight:${isFloor ? '600' : '400'};color:${isFloor ? 'var(--text)' : 'var(--text-secondary)'}">${escHtml(name)}</td>
+        <td>${escHtml(city)}</td>
+        <td><span class="id-chip">${escHtml(String(owner))}</span></td>
+        <td style="text-align:right;font-weight:${isFloor ? '700' : '500'};color:${isFloor ? 'var(--success)' : 'var(--text-secondary)'}">
+          ${price !== '—' ? price + ' UPX' : '—'}
+          ${isFloor ? ' <span class="badge badge--warning" style="margin-left:0.4rem;font-size:0.62rem">FLOOR</span>' : ''}
+        </td>
+      </tr>
+    `;
+  }).join('');
+}
+
+/* ── Structure Market: Render sales history ──────────────── */
+function renderSalesHistory(sales) {
+  salesCountBadge.textContent = sales.length;
+  if (sales.length === 0) {
+    salesHistoryBody.innerHTML = '<tr class="table-empty"><td colspan="3">No chain sales found — blockchain action filter may need updating</td></tr>';
+    metricLastSold.textContent = '—';
+    metricLastSoldDate.textContent = 'no chain data yet';
+    return;
+  }
+
+  const first = sales[0];
+  const lastPrice = first.priceUpx != null ? Number(first.priceUpx).toLocaleString() + ' UPX' : '?';
+  const lastDate = first.timestamp ? new Date(first.timestamp).toLocaleDateString() : '—';
+  metricLastSold.textContent = lastPrice;
+  metricLastSoldDate.textContent = `last sold ${lastDate}`;
+
+  salesHistoryBody.innerHTML = sales.map(s => {
+    const price = s.priceUpx != null ? Number(s.priceUpx).toLocaleString() + ' UPX' : '—';
+    const date = s.timestamp ? new Date(s.timestamp).toLocaleString() : '—';
+    const trx = s.trxId ? s.trxId.slice(0, 12) + '…' : '—';
+    return `
+      <tr>
+        <td><span class="id-chip">${escHtml(trx)}</span></td>
+        <td style="font-weight:600;color:var(--primary-lt)">${price}</td>
+        <td style="color:var(--text-muted)">${escHtml(date)}</td>
+      </tr>
+    `;
+  }).join('');
+}
+
+/* ── Structure Market: Search handler ───────────────────────*/
+marketSearchForm.addEventListener('submit', async e => {
+  e.preventDefault();
+  hideAlert(marketError);
+
+  const buildingTypeId = marketTypeSelect.value;
+  const cityId = marketCitySelect.value;
+
+  if (!buildingTypeId) {
+    showAlert(marketError, 'Please select a time period.');
+    return;
+  }
+
+  setLoading(marketSearchBtn, true);
+  marketResults.classList.add('hidden');
+  marketEmptyState.classList.add('hidden');
+
+  try {
+    const [marketData, salesData] = await Promise.all([
+      marketApi.getMarket(buildingTypeId, cityId),
+      marketApi.getSalesHistory(),
+    ]);
+
+    const listings = marketData.listings || [];
+    const floor = marketData.floor;
+    const count = marketData.count || listings.length;
+    const sales = salesData.sales || [];
+
+    metricFloor.textContent  = floor != null ? Number(floor).toLocaleString() + ' UPX' : '—';
+    metricCount.textContent  = count;
+
+    renderListings(listings);
+    renderSalesHistory(sales);
+
+    marketResults.classList.remove('hidden');
+  } catch (err) {
+    showAlert(marketError, 'Search failed. ' + (err.message || ''));
+    marketEmptyState.classList.remove('hidden');
+  } finally {
+    setLoading(marketSearchBtn, false);
+  }
+});
+
 /* ── Init ────────────────────────────────────────────────── */
 if (state.token) {
   showApp();
@@ -506,5 +664,8 @@ if (state.token) {
   showAuth();
 }
 
-loadCities();
+loadCities().then(() => {
+  if (state.cities) populateMarketCities(state.cities);
+});
 loadPurchases();
+loadStructureTypes();

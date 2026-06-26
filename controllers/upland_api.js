@@ -5,8 +5,10 @@ const userRouter = require("./upland/user");
 const escrowRouter = require("./upland/escrow");
 const tournamentRouter = require("./upland/tournaments");
 const appchainRouter = require("./upland/appchain");
+const structuresRouter = require("./upland/structures");
 
 uplandRouter.use("/auth", authRouter);
+uplandRouter.use("/structures", structuresRouter);
 uplandRouter.use("/", genericRouter);
 uplandRouter.use("/user", userRouter);
 uplandRouter.use("/containers", escrowRouter);
