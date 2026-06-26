@@ -385,10 +385,11 @@ async function loadPurchases() {
     }
     purchasesBody.innerHTML = purchases.map(p => {
       const time = new Date(p.purchasedAt).toLocaleTimeString();
+      const label = p.address || String(p.propertyId);
       return `
         <tr class="purchase-row" data-prop-id="${escHtml(String(p.propertyId))}" style="cursor:pointer" title="Click to view property history">
-          <td><span class="id-chip">${escHtml(String(p.propertyId))}</span></td>
-          <td>—</td>
+          <td><span class="id-chip" title="${escHtml(String(p.propertyId))}">${escHtml(label)}</span></td>
+          <td data-city="">—</td>
           <td>${Number(p.priceUpx).toLocaleString()}</td>
           <td>${escHtml(time)}</td>
         </tr>
@@ -410,8 +411,10 @@ async function enrichPurchaseRows(purchases) {
     try {
       const prop = await fetch(`/api/upland/properties/${pid}`).then(r => r.json());
       document.querySelectorAll(`tr[data-prop-id="${pid}"]`).forEach(row => {
-        row.children[0].innerHTML = `<span class="id-chip">${escHtml(prop.address || pid)}</span>`;
-        row.children[1].textContent = prop.city?.name || '—';
+        const addrCell = row.children[0];
+        const cityCell = row.querySelector('[data-city]');
+        if (prop.address) addrCell.innerHTML = `<span class="id-chip" title="${escHtml(pid)}">${escHtml(prop.address)}</span>`;
+        if (cityCell && prop.city?.name) cityCell.textContent = prop.city.name;
       });
     } catch { /* skip */ }
   }

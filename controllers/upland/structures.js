@@ -32,12 +32,14 @@ structuresRouter.get("/market", async (req, res) => {
 
   const raw = (result.actions || []).map(action => {
     const data = action.act?.data || {};
+    const addrMatch = (data.memo || "").match(/owns (.+?) on Upland/);
     return {
       trxId:       action.trx_id,
       propertyId:  String(data.a45 || ""),
-      buyerEos:    data.p51 || "",
-      priceUpx:    parseFloat(data.p54 || "") || 0,
+      buyerEos:    data.p14 || "",
+      priceUpx:    parseFloat((data.p24 || "0 UPX").split(" ")[0]) || 0,
       purchasedAt: action["@timestamp"] || action.timestamp,
+      address:     addrMatch ? addrMatch[1] : null,
     };
   });
 
@@ -65,11 +67,11 @@ structuresRouter.get("/market", async (req, res) => {
     const prop = propMap[p.propertyId];
     return {
       ...p,
-      type:  { name: "Property" },
-      city:  prop?.city  || null,
-      owner: p.buyerEos,
-      price: p.priceUpx,
-      address:      prop?.address      || null,
+      type:         { name: "Property" },
+      city:         prop?.city         || null,
+      owner:        p.buyerEos,
+      price:        p.priceUpx,
+      address:      p.address || prop?.address || null,
       neighborhood: prop?.neighborhood || null,
     };
   });
@@ -89,12 +91,12 @@ structuresRouter.get("/market", async (req, res) => {
 });
 
 // GET /api/upland/structures/sales-history?limit=20
-// Returns recent property purchases from Appchain (n41 actions)
+// Returns recent property ownership changes from Appchain (n5 notarization actions)
 structuresRouter.get("/sales-history", async (req, res) => {
   const { limit = 20, before, after } = req.query;
   try {
     const result = await getActions({
-      filter: "playuplandme:n41",
+      filter: "playuplandme:n5",
       limit:  Math.min(Number(limit), 100),
       sort:   "desc",
       before,
@@ -102,13 +104,15 @@ structuresRouter.get("/sales-history", async (req, res) => {
     });
     const sales = (result.actions || []).map(action => {
       const data = action.act?.data || {};
+      const addrMatch = (data.memo || "").match(/owns (.+?) on Upland/);
       return {
         trxId:       action.trx_id,
         blockNum:    action.block_num,
         timestamp:   action["@timestamp"] || action.timestamp,
-        priceUpx:    parseFloat(data.p54 || "") || null,
+        priceUpx:    parseFloat((data.p24 || "0 UPX").split(" ")[0]) || null,
         propertyId:  String(data.a45 || ""),
-        buyerEos:    data.p51 || "",
+        buyerEos:    data.p14 || "",
+        address:     addrMatch ? addrMatch[1] : null,
       };
     });
     res.json({ total: result.total?.value ?? sales.length, sales });

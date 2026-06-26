@@ -22,12 +22,11 @@ const getActions = async ({
   return response.json();
 };
 
-const getPropertyPurchases = async (options = {}) => {
-  return getActions({
-    ...options,
-    filter: "playuplandme:n41",
-  });
-};
+// n5 = property ownership notarization: fired when a property changes hands.
+// Fields: p14=new owner EOS, a45=property ID uint64, p24=price UPX asset,
+// memo="...owns {ADDRESS} on Upland. Initial minting transaction: {txHash}"
+const getPropertyPurchases = (options = {}) =>
+  getActions({ ...options, filter: "playuplandme:n5" });
 
 const getTableRows = async ({ code, scope, table, limit = 10 }) => {
   const response = await fetch(`${RPC_URL}/v1/chain/get_table_rows`, {
@@ -41,16 +40,20 @@ const getTableRows = async ({ code, scope, table, limit = 10 }) => {
 
 const parsePurchaseAction = (action) => {
   const data = action.act?.data || {};
-  const priceStr = data.p54 || "0 UPX";
-  const priceUpx = parseFloat(priceStr.split(" ")[0]);
+  const priceUpx = parseFloat((data.p24 || "0 UPX").split(" ")[0]);
+
+  // Extract address from the notarization memo
+  const memo = data.memo || "";
+  const addrMatch = memo.match(/owns (.+?) on Upland/);
 
   return {
     trxId: action.trx_id,
     blockNum: action.block_num,
-    buyerEos: data.p51,
-    propertyId: data.a45,
+    buyerEos: data.p14,
+    propertyId: String(data.a45 || ""),
     priceUpx,
     purchasedAt: action["@timestamp"] || action.timestamp,
+    address: addrMatch ? addrMatch[1] : null,
   };
 };
 
