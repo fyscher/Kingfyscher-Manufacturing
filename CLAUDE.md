@@ -22,8 +22,6 @@ The app reads from environment variables (no `.env` file committed). Required va
 |---|---|
 | `PORT` | HTTP server port |
 | `SECRET` | JWT signing secret |
-| `SUPABASE_URL` | Supabase project URL |
-| `SUPABASE_KEY` | Supabase service role key |
 | `DEVSHOPID` | Upland API shop ID |
 | `KFM_PASSWORD` | Upland API password |
 | `UPLAND_URI` | Upland API base URL |
@@ -34,7 +32,7 @@ The app reads from environment variables (no `.env` file committed). Required va
 
 **Entry point split**: `index.js` only binds the port; `app.js` wires up Express and all middleware. Tests import `app.js` directly via supertest, so the server never binds a port during test runs.
 
-**Database**: Supabase (PostgreSQL). Client initialised in `utils/supabase.js`. The `models/user.js` module exports query helpers (`findById`, `findOne`, `find`, `create`, `update`, `findByIdAndDelete`, `deleteMany`) that wrap Supabase queries with camelCase ↔ snake_case field mapping and sensitive field stripping.
+**Database**: No persistent database is currently wired up. `models/user.js` uses an in-memory store. The module exports query helpers (`findById`, `findOne`, `find`, `create`, `update`, `findByIdAndDelete`, `deleteMany`) with the same interface so a real DB can be dropped in later.
 
 **Request flow**: `tokenExtractor` middleware (in `middleware.js` at project root) runs on every request and attaches `req.token` from the `Authorization: Bearer <token>` header. The `userExtractor` middleware is applied per-route to endpoints requiring auth (GET and DELETE on `/api/users`). `errorHandler` at the tail of `app.js` normalises PostgreSQL constraint violations, JWT, and other errors into JSON responses.
 

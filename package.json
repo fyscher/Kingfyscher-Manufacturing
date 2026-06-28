@@ -19,7 +19,6 @@
     "start": "nodemon --env-file .env index.js"
   },
   "dependencies": {
-    "@supabase/supabase-js": "^2.108.2",
     "bcrypt": "^6.0.0",
     "cors": "^2.8.5",
     "express": "^5.1.0",
