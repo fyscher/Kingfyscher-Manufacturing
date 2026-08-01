@@ -85,6 +85,18 @@
           </svg>
           Structure Market
         </a>
+        <a class="nav-item" data-section="map-assets">
+          <svg class="nav-icon" viewBox="0 0 20 20" fill="currentColor">
+            <path fill-rule="evenodd" d="M4 2a2 2 0 00-2 2v12a2 2 0 002 2h12a2 2 0 002-2V4a2 2 0 00-2-2H4zm6 3a1 1 0 100 2 1 1 0 000-2zm-3 4a3 3 0 116 0 3 3 0 01-6 0zm3 5a5 5 0 00-4.546 2.916A6.983 6.983 0 0010 18a6.983 6.983 0 004.546-1.084A5 5 0 0010 14z" clip-rule="evenodd"/>
+          </svg>
+          Map Assets
+        </a>
+        <a class="nav-item" data-section="buildings">
+          <svg class="nav-icon" viewBox="0 0 20 20" fill="currentColor">
+            <path fill-rule="evenodd" d="M4 4a2 2 0 012-2h8a2 2 0 012 2v12a1 1 0 110 2h-3a1 1 0 01-1-1v-2a1 1 0 00-1-1H9a1 1 0 00-1 1v2a1 1 0 01-1 1H4a1 1 0 110-2V4zm3 1h2v2H7V5zm2 4H7v2h2V9zm2-4h2v2h-2V5zm2 4h-2v2h2V9z" clip-rule="evenodd"/>
+          </svg>
+          Building Browser
+        </a>
       </nav>
 
       <div class="sidebar-footer">
@@ -450,13 +462,15 @@
               <table class="table">
                 <thead>
                   <tr>
-                    <th>Transaction</th>
-                    <th>Price (UPX)</th>
+                    <th>Property</th>
+                    <th>Buyer (EOS)</th>
+                    <th style="text-align:right">Price (UPX)</th>
                     <th>Date</th>
+                    <th>Txn</th>
                   </tr>
                 </thead>
                 <tbody id="sales-history-body">
-                  <tr class="table-empty"><td colspan="3">Loading blockchain history...</td></tr>
+                  <tr class="table-empty"><td colspan="5">Loading blockchain history...</td></tr>
                 </tbody>
               </table>
             </div>
@@ -470,6 +484,202 @@
             <path stroke-linecap="round" stroke-linejoin="round" d="M3 13.125C3 12.504 3.504 12 4.125 12h2.25c.621 0 1.125.504 1.125 1.125v6.75C7.5 20.496 6.996 21 6.375 21h-2.25A1.125 1.125 0 013 19.875v-6.75zM9.75 8.625c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125v11.25c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 01-1.125-1.125V8.625zM16.5 4.125c0-.621.504-1.125 1.125-1.125h2.25C20.496 3 21 3.504 21 4.125v15.75c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 01-1.125-1.125V4.125z"/>
           </svg>
           <p style="font-size:0.875rem">Select a time period and search to see on-chain sales data</p>
+        </div>
+
+      </section>
+
+      <!-- Map Assets -->
+      <section id="section-map-assets" class="section">
+        <div class="page-header">
+          <div>
+            <h2 class="page-title">Map Asset Activity</h2>
+            <p class="page-subtitle">On-chain NFT mints, secondary sales, and active listings for decorations, seeds, ornaments &amp; uppies</p>
+          </div>
+          <button class="btn btn--ghost btn--sm" id="map-assets-refresh">Refresh</button>
+        </div>
+
+        <!-- Filters -->
+        <div class="card" style="margin-bottom:1.25rem">
+          <div class="card-body" style="padding:1rem">
+            <div class="inline-form" style="gap:0.75rem;flex-wrap:wrap">
+              <div class="field" style="min-width:180px;flex:1">
+                <label for="ma-category">Category</label>
+                <select id="ma-category">
+                  <option value="">All categories</option>
+                  <option value="outdoordecor">Outdoor Decor</option>
+                  <option value="uppie">Uppies</option>
+                  <option value="structornmt">Structure Ornaments</option>
+                  <option value="seeds">Seeds</option>
+                  <option value="vehicle">Vehicles</option>
+                </select>
+              </div>
+              <div class="field" style="min-width:140px;flex:0 1 auto">
+                <label for="ma-limit">Show</label>
+                <select id="ma-limit">
+                  <option value="30">30 events</option>
+                  <option value="50" selected>50 events</option>
+                  <option value="100">100 events</option>
+                </select>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Tab bar -->
+        <div class="tab-bar" style="margin-bottom:1rem">
+          <button class="tab-btn active" data-ma-tab="mints">Recent Mints</button>
+          <button class="tab-btn" data-ma-tab="sales">Recent Sales</button>
+          <button class="tab-btn" data-ma-tab="listings">Active Listings</button>
+        </div>
+
+        <!-- Mints tab -->
+        <div id="ma-tab-mints" class="ma-tab-panel">
+          <div class="card">
+            <div class="card-header">
+              <h3 class="card-title">Recent Primary Mints</h3>
+              <span class="badge" id="ma-mints-count">—</span>
+            </div>
+            <div class="card-body card-body--flush" style="max-height:500px;overflow-y:auto">
+              <table class="table">
+                <thead>
+                  <tr>
+                    <th>NFT Name</th>
+                    <th>Category</th>
+                    <th style="text-align:right">Mint #</th>
+                    <th>Player</th>
+                    <th>Date</th>
+                  </tr>
+                </thead>
+                <tbody id="ma-mints-body">
+                  <tr class="table-empty"><td colspan="5">Loading…</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+
+        <!-- Sales tab -->
+        <div id="ma-tab-sales" class="ma-tab-panel hidden">
+          <div class="card">
+            <div class="card-header">
+              <h3 class="card-title">Recent Secondary Sales</h3>
+              <span class="badge" id="ma-sales-count">—</span>
+            </div>
+            <div class="card-body card-body--flush" style="max-height:500px;overflow-y:auto">
+              <table class="table">
+                <thead>
+                  <tr>
+                    <th>NFT Name</th>
+                    <th>Category</th>
+                    <th style="text-align:right">Mint #</th>
+                    <th style="text-align:right">Sale Price</th>
+                    <th>Buyer</th>
+                    <th>Date</th>
+                  </tr>
+                </thead>
+                <tbody id="ma-sales-body">
+                  <tr class="table-empty"><td colspan="6">Loading…</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+
+        <!-- Listings tab -->
+        <div id="ma-tab-listings" class="ma-tab-panel hidden">
+          <div class="card">
+            <div class="card-header">
+              <h3 class="card-title">Active UPX Listings</h3>
+              <span class="badge" id="ma-listings-count">—</span>
+            </div>
+            <div class="card-body card-body--flush" style="max-height:500px;overflow-y:auto">
+              <table class="table">
+                <thead>
+                  <tr>
+                    <th>NFT ID</th>
+                    <th>Seller (EOS)</th>
+                    <th style="text-align:right">Price (UPX)</th>
+                    <th>Listed At</th>
+                    <th>Txn</th>
+                  </tr>
+                </thead>
+                <tbody id="ma-listings-body">
+                  <tr class="table-empty"><td colspan="5">Loading…</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+
+      </section>
+
+      <!-- Building Browser -->
+      <section id="section-buildings" class="section">
+        <div class="page-header">
+          <div>
+            <h2 class="page-title">Building Browser</h2>
+            <p class="page-subtitle">Find every property in a building — with last price sold and lowest current listing</p>
+          </div>
+        </div>
+
+        <!-- Search Form -->
+        <div class="card" style="margin-bottom:1.25rem">
+          <div class="card-header">
+            <h3 class="card-title">Search by Building / Address</h3>
+          </div>
+          <div class="card-body">
+            <form id="building-search-form" class="inline-form">
+              <div class="field" style="min-width:180px;flex:1">
+                <label for="building-city">City (optional)</label>
+                <select id="building-city">
+                  <option value="">All cities</option>
+                </select>
+              </div>
+              <div class="field" style="min-width:260px;flex:3">
+                <label for="building-address">Building / Street Address</label>
+                <input type="text" id="building-address" placeholder="e.g. 100 Main Street or Lombard" required>
+              </div>
+              <button type="submit" class="btn btn--primary" id="building-search-btn">
+                <span class="btn-text">Find Properties</span>
+                <span class="btn-spinner hidden"></span>
+              </button>
+            </form>
+            <div id="building-error" class="alert alert--error hidden" style="margin-top:0.75rem"></div>
+          </div>
+        </div>
+
+        <!-- Results -->
+        <div id="building-results" class="hidden">
+          <div class="card">
+            <div class="card-header">
+              <h3 class="card-title" id="building-results-title">Properties</h3>
+              <span class="badge" id="building-count">0</span>
+            </div>
+            <div class="card-body card-body--flush" style="max-height:540px;overflow-y:auto">
+              <table class="table">
+                <thead>
+                  <tr>
+                    <th>Address</th>
+                    <th>Neighborhood</th>
+                    <th>Status</th>
+                    <th style="text-align:right">Current Price</th>
+                    <th style="text-align:right">Last Sale</th>
+                    <th>Last Sold</th>
+                  </tr>
+                </thead>
+                <tbody id="building-body">
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+
+        <!-- Empty state -->
+        <div id="building-empty-state" style="text-align:center;padding:4rem 1rem;color:var(--text-muted)">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="width:48px;height:48px;margin:0 auto 1rem;opacity:0.3">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M2.25 21h19.5m-18-18v18m10.5-18v18m6-13.5V21M6.75 6.75h.75m-.75 3h.75m-.75 3h.75m3-6h.75m-.75 3h.75m-.75 3h.75M6.75 21v-3.375c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125V21M3 3h12m-.75 4.5H21m-3.75 3.75h.008v.008h-.008v-.008zm0 3h.008v.008h-.008v-.008zm0 3h.008v.008h-.008v-.008z"/>
+          </svg>
+          <p style="font-size:0.875rem">Enter a building or street address to browse properties with pricing history</p>
         </div>
 
       </section>

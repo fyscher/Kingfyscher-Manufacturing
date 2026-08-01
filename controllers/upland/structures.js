@@ -16,15 +16,15 @@ structuresRouter.get("/types", (_req, res) => {
 });
 
 // GET /api/upland/structures/market?buildingTypeId=7d&cityId=1
-// Returns recent n41 property purchases from Appchain within the chosen period,
-// enriched with address/city from the Developers API, optionally filtered by city.
+// Returns recent n5 property ownership notarizations from Appchain within the chosen
+// period (actual sale prices), enriched with address/city, optionally filtered by city.
 structuresRouter.get("/market", async (req, res) => {
   const { buildingTypeId = "7d", cityId } = req.query;
   const period = PERIODS.find(p => p.id === buildingTypeId) || PERIODS[1];
   const after = new Date(Date.now() - period.hours * 3600 * 1000).toISOString();
 
   const result = await getActions({
-    filter: "playuplandme:n41",
+    filter: "playuplandme:n5",
     limit: 100,
     sort: "desc",
     after,
@@ -119,6 +119,72 @@ structuresRouter.get("/sales-history", async (req, res) => {
   } catch (err) {
     res.json({ total: 0, sales: [], error: err.message });
   }
+});
+
+// GET /api/upland/structures/building-search?cityId=&address=
+// Searches Upland properties by address, then enriches each result with the most
+// recent n5 on-chain sale price by scanning recent chain history.
+structuresRouter.get("/building-search", async (req, res) => {
+  const { cityId, address } = req.query;
+  if (!address || !address.trim()) return res.json({ properties: [] });
+
+  const params = new URLSearchParams({ currentPage: 1, pageSize: 50 });
+  if (cityId) params.set("cityId", cityId);
+  params.set("textSearch", address.trim());
+
+  let properties = [];
+  try {
+    const propData = await uplandFetch(`/properties?${params}`);
+    properties = propData.results || [];
+  } catch {
+    return res.json({ properties: [] });
+  }
+
+  if (properties.length === 0) return res.json({ properties: [] });
+
+  const propertyIds = new Set(properties.map(p => String(p.id)));
+  const salesMap = {};
+
+  // Scan recent n5 actions in batches to build a last-sale map for the matched IDs
+  let before;
+  for (let batch = 0; batch < 5; batch++) {
+    let result;
+    try {
+      result = await getActions({ filter: "playuplandme:n5", limit: 100, sort: "desc", before });
+    } catch { break; }
+
+    const actions = result.actions || [];
+    if (actions.length === 0) break;
+
+    for (const action of actions) {
+      const data = action.act?.data || {};
+      const pid = String(data.a45 || "");
+      if (propertyIds.has(pid) && !salesMap[pid]) {
+        const addrMatch = (data.memo || "").match(/owns (.+?) on Upland/);
+        salesMap[pid] = {
+          priceUpx:  parseFloat((data.p24 || "0 UPX").split(" ")[0]) || null,
+          timestamp: action["@timestamp"] || action.timestamp,
+          buyerEos:  data.p14 || "",
+          address:   addrMatch ? addrMatch[1] : null,
+        };
+      }
+    }
+
+    if (Object.keys(salesMap).length >= propertyIds.size) break;
+    before = actions[actions.length - 1]?.["@timestamp"];
+  }
+
+  const enriched = properties.map(p => ({
+    id:           p.id,
+    address:      p.address,
+    city:         p.city,
+    neighborhood: p.neighborhood,
+    status:       p.status,
+    currentPrice: p.mintPrice || null,
+    lastSale:     salesMap[String(p.id)] || null,
+  }));
+
+  res.json({ properties: enriched });
 });
 
 module.exports = structuresRouter;

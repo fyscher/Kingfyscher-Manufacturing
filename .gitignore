@@ -19,3 +19,8 @@ Thumbs.db
 .idea/
 *.swp
 
+# SQLite dev database
+*.db
+*.db-shm
+*.db-wal
+
