@@ -772,10 +772,16 @@ const mapAssetsApi = {
   getListings(limit = 50) {
     return fetch(`/api/upland/map-assets/listings?limit=${limit}`).then(r => r.json());
   },
+  getPriceHistory(name, days, period = 'day') {
+    return fetch(`/api/upland/map-assets/price-history?${new URLSearchParams({ name, days, period })}`).then(r => r.json());
+  },
+  getMarketOverview() {
+    return fetch('/api/upland/map-assets/market-overview').then(r => r.json());
+  },
 };
 
 /* ── Map Assets: State / DOM refs ────────────────────────── */
-const maState = { activeTab: 'mints', loading: false };
+const maState = { activeTab: 'chart', loading: false, chart: null, chartResizeObs: null, avgPriceUpx: null };
 const maCategorySelect  = $('ma-category');
 const maLimitSelect     = $('ma-limit');
 const maRefreshBtn      = $('map-assets-refresh');
@@ -793,11 +799,15 @@ const CATEGORY_LABELS = {
   uppie:        'Uppie',
   seeds:        'Seed',
   vehicle:      'Vehicle',
+  landvehicle:  'Land Vehicle',
 };
 
 function maCategoryBadge(cat) {
   const label = CATEGORY_LABELS[cat] || (cat || '—');
-  const color = cat === 'uppie' ? 'var(--primary-lt)' : cat === 'outdoordecor' ? 'var(--success)' : 'var(--text-muted)';
+  const color = cat === 'uppie' ? 'var(--primary-lt)'
+    : cat === 'outdoordecor'   ? 'var(--success)'
+    : cat === 'seeds'          ? 'var(--accent-lt)'
+    : 'var(--text-muted)';
   return `<span style="font-size:0.72rem;padding:0.15rem 0.5rem;border-radius:4px;background:var(--bg-elevated);color:${color};white-space:nowrap">${escHtml(label)}</span>`;
 }
 
@@ -813,10 +823,23 @@ function maRelDate(ts) {
   return d.toLocaleDateString();
 }
 
-/* ── Map Assets: Render mints ────────────────────────────── */
+function maFmtUpx(n) {
+  return n != null ? `${Number(n).toLocaleString()} UPX` : '—';
+}
+
+/* ── Map Assets: Render overview KPIs ───────────────────── */
+function renderMaOverview(data) {
+  const fmt = n => n != null ? Number(n).toLocaleString() : '—';
+  $('ma-kpi-mints').textContent    = fmt(data.mintsToday);
+  $('ma-kpi-sales').textContent    = fmt(data.salesToday);
+  $('ma-kpi-avg').textContent      = data.avgPriceUpx != null ? maFmtUpx(data.avgPriceUpx) : '—';
+  $('ma-kpi-listings').textContent = fmt(data.activeListings);
+}
+
+/* ── Map Assets: Render mints + sales ────────────────────── */
 function renderMaEvents(events) {
-  const mints  = events.filter(e => e.type === 'mint');
-  const sales  = events.filter(e => e.type === 'sale');
+  const mints = events.filter(e => e.type === 'mint');
+  const sales = events.filter(e => e.type === 'sale');
   maMintsCount.textContent = mints.length;
   maSalesCount.textContent = sales.length;
 
@@ -829,8 +852,7 @@ function renderMaEvents(events) {
         <td style="text-align:right;color:var(--text-muted)">${e.mint != null ? '#' + e.mint : '—'}</td>
         <td><span class="id-chip" title="${escHtml(e.buyerEos || '')}">${escHtml(e.uplandUser || e.buyerEos || '—')}</span></td>
         <td style="color:var(--text-muted);white-space:nowrap">${maRelDate(e.timestamp)}</td>
-      </tr>
-    `).join('');
+      </tr>`).join('');
 
   maSalesBody.innerHTML = sales.length === 0
     ? '<tr class="table-empty"><td colspan="6">No secondary sales found for this filter</td></tr>'
@@ -846,61 +868,174 @@ function renderMaEvents(events) {
           <td style="text-align:right">${price}</td>
           <td><span class="id-chip" title="${escHtml(e.buyerEos || '')}">${escHtml(e.uplandUser || e.buyerEos || '—')}</span></td>
           <td style="color:var(--text-muted);white-space:nowrap">${maRelDate(e.timestamp)}</td>
-        </tr>
-      `;
+        </tr>`;
     }).join('');
 }
 
-/* ── Map Assets: Render listings ─────────────────────────── */
-function renderMaListings(listings) {
+/* ── Map Assets: Render listings (with below-avg badge) ──── */
+function renderMaListings(listings, avgPrice) {
   maListingsCount.textContent = listings.length;
 
   maListingsBody.innerHTML = listings.length === 0
-    ? '<tr class="table-empty"><td colspan="5">No active UPX listings found</td></tr>'
+    ? '<tr class="table-empty"><td colspan="6">No active UPX listings found</td></tr>'
     : listings.map(l => {
-      const price = l.priceUpx != null
+      const priceStr = l.priceUpx != null
         ? `<span style="font-weight:700;color:var(--primary-lt)">${Number(l.priceUpx).toLocaleString()} UPX</span>`
         : '—';
       const trx = l.trxId ? l.trxId.slice(0, 10) + '…' : '—';
+      const isBelow = avgPrice && l.priceUpx && l.priceUpx < avgPrice * 0.9;
+      const belowBadge = isBelow
+        ? '<span style="font-size:0.65rem;padding:0.1rem 0.4rem;border-radius:4px;background:var(--success-glow);color:var(--success);display:block;margin-top:2px;font-weight:600">BELOW AVG</span>'
+        : '';
+      const vsAvg = avgPrice && l.priceUpx
+        ? `<span style="font-size:0.75rem;color:${l.priceUpx < avgPrice ? 'var(--success)' : 'var(--text-muted)'}">
+             ${l.priceUpx < avgPrice ? '▼' : '▲'} ${Math.abs(Math.round((l.priceUpx / avgPrice - 1) * 100))}%
+           </span>`
+        : '<span style="color:var(--text-muted)">—</span>';
       return `
         <tr>
           <td><span class="id-chip">${escHtml(l.nftId || '—')}</span></td>
           <td><span class="id-chip">${escHtml(l.sellerEos || '—')}</span></td>
-          <td style="text-align:right">${price}</td>
+          <td style="text-align:right">${priceStr}${belowBadge}</td>
+          <td style="text-align:right">${vsAvg}</td>
           <td style="color:var(--text-muted);white-space:nowrap">${maRelDate(l.timestamp)}</td>
           <td><span class="id-chip" title="${escHtml(l.trxId || '')}">${escHtml(trx)}</span></td>
-        </tr>
-      `;
+        </tr>`;
     }).join('');
 }
 
-/* ── Map Assets: Load data ───────────────────────────────── */
+/* ── Map Assets: Populate NFT name selector ──────────────── */
+function populateMaNftNames(events) {
+  const sel = $('ma-nft-name');
+  const current = sel.value;
+  const seen = new Set();
+  const names = [];
+
+  for (const e of events) {
+    if (e.displayName && !seen.has(e.displayName)) {
+      seen.add(e.displayName);
+      names.push(e.displayName);
+    }
+  }
+  names.sort();
+
+  sel.innerHTML = '<option value="">Select NFT type…</option>' +
+    names.map(n => `<option value="${escHtml(n)}"${n === current ? ' selected' : ''}>${escHtml(n)}</option>`).join('');
+}
+
+/* ── Map Assets: Chart lifecycle ────────────────────────── */
+function destroyMaChart() {
+  if (maState.chartResizeObs) { maState.chartResizeObs.disconnect(); maState.chartResizeObs = null; }
+  if (maState.chart) { maState.chart.remove(); maState.chart = null; }
+}
+
+function buildMaChart(candles) {
+  destroyMaChart();
+  const container   = $('ma-chart-container');
+  const placeholder = $('ma-chart-placeholder');
+
+  if (!candles || candles.length === 0) {
+    placeholder.style.display = 'flex';
+    return;
+  }
+  placeholder.style.display = 'none';
+
+  const chart = LightweightCharts.createChart(container, {
+    width:  container.offsetWidth,
+    height: 300,
+    layout: { background: { color: '#111120' }, textColor: '#94a3b8' },
+    grid:   { vertLines: { color: '#1c1c30' }, horzLines: { color: '#1c1c30' } },
+    rightPriceScale: { borderColor: '#1c1c30' },
+    timeScale:       { borderColor: '#1c1c30', timeVisible: false },
+    crosshair: { mode: 1 },
+  });
+
+  const series = chart.addCandlestickSeries({
+    upColor:         '#10b981',
+    downColor:       '#ef4444',
+    borderUpColor:   '#10b981',
+    borderDownColor: '#ef4444',
+    wickUpColor:     '#10b981',
+    wickDownColor:   '#ef4444',
+  });
+
+  series.setData(candles);
+  chart.timeScale().fitContent();
+
+  const obs = new ResizeObserver(() => chart.applyOptions({ width: container.offsetWidth }));
+  obs.observe(container);
+
+  maState.chart = chart;
+  maState.chartResizeObs = obs;
+}
+
+/* ── Map Assets: Load chart for selected NFT ─────────────── */
+async function loadMaChart() {
+  const name = $('ma-nft-name').value;
+  const days = $('ma-period').value;
+  if (!name) return;
+
+  const placeholder = $('ma-chart-placeholder');
+  const chartMsg    = $('ma-chart-msg');
+  const chartStats  = $('ma-chart-stats');
+  destroyMaChart();
+  placeholder.style.display = 'flex';
+  chartMsg.textContent      = 'Loading price history…';
+  chartStats.classList.add('hidden');
+
+  try {
+    const data = await mapAssetsApi.getPriceHistory(name, days, 'day');
+    buildMaChart(data.candles);
+
+    if (data.totalSales > 0) {
+      $('ma-stat-avg').textContent    = maFmtUpx(data.avg);
+      $('ma-stat-min').textContent    = maFmtUpx(data.min);
+      $('ma-stat-max').textContent    = maFmtUpx(data.max);
+      $('ma-stat-trades').textContent = data.totalSales;
+      chartStats.classList.remove('hidden');
+    } else {
+      placeholder.style.display = 'flex';
+      chartMsg.textContent      = `No priced sales found for "${name}" in recent on-chain history`;
+    }
+  } catch {
+    placeholder.style.display = 'flex';
+    chartMsg.textContent      = 'Failed to load price history';
+  }
+}
+
+/* ── Map Assets: Load all data ───────────────────────────── */
 async function loadMapAssets() {
   if (maState.loading) return;
   maState.loading = true;
 
-  const category = maCategorySelect.value;
-  const limit    = maLimitSelect.value;
-
   maMintsBody.innerHTML    = '<tr class="table-empty"><td colspan="5">Loading…</td></tr>';
   maSalesBody.innerHTML    = '<tr class="table-empty"><td colspan="6">Loading…</td></tr>';
-  maListingsBody.innerHTML = '<tr class="table-empty"><td colspan="5">Loading…</td></tr>';
+  maListingsBody.innerHTML = '<tr class="table-empty"><td colspan="6">Loading…</td></tr>';
+
+  const category = maCategorySelect.value;
+  const limit    = maLimitSelect.value;
 
   try {
     const params = { limit };
     if (category) params.category = category;
 
-    const [actData, lstData] = await Promise.all([
+    const [actData, lstData, ovData] = await Promise.all([
       mapAssetsApi.getActivity(params),
       mapAssetsApi.getListings(limit),
+      mapAssetsApi.getMarketOverview(),
     ]);
 
-    renderMaEvents(actData.events || []);
-    renderMaListings(lstData.listings || []);
+    renderMaOverview(ovData);
+    maState.avgPriceUpx = ovData.avgPriceUpx || null;
+
+    const events = actData.events || [];
+    renderMaEvents(events);
+    populateMaNftNames(events);
+    renderMaListings(lstData.listings || [], maState.avgPriceUpx);
   } catch {
     maMintsBody.innerHTML    = '<tr class="table-empty"><td colspan="5">Failed to load</td></tr>';
     maSalesBody.innerHTML    = '<tr class="table-empty"><td colspan="6">Failed to load</td></tr>';
-    maListingsBody.innerHTML = '<tr class="table-empty"><td colspan="5">Failed to load</td></tr>';
+    maListingsBody.innerHTML = '<tr class="table-empty"><td colspan="6">Failed to load</td></tr>';
   } finally {
     maState.loading = false;
   }
@@ -918,10 +1053,14 @@ document.querySelectorAll('[data-ma-tab]').forEach(btn => {
   });
 });
 
+/* ── Map Assets: Chart controls ─────────────────────────── */
+$('ma-nft-name').addEventListener('change', loadMaChart);
+$('ma-period').addEventListener('change',   loadMaChart);
+
 /* ── Map Assets: Filter change / refresh ─────────────────── */
 maCategorySelect.addEventListener('change', loadMapAssets);
 maLimitSelect.addEventListener('change', loadMapAssets);
-maRefreshBtn.addEventListener('click', loadMapAssets);
+maRefreshBtn.addEventListener('click', () => { loadMapAssets(); if ($('ma-nft-name').value) loadMaChart(); });
 
 /* ── Map Assets: Load on nav ─────────────────────────────── */
 document.querySelector('.nav-item[data-section="map-assets"]').addEventListener('click', () => {

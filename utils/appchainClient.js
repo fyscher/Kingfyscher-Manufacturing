@@ -8,12 +8,14 @@ const getActions = async ({
   sort = "desc",
   after,
   before,
+  skip,
 } = {}) => {
   const params = new URLSearchParams({ limit, sort });
   if (filter) params.set("filter", filter);
   if (account) params.set("account", account);
   if (after) params.set("after", after);
   if (before) params.set("before", before);
+  if (skip) params.set("skip", skip);
 
   const response = await fetch(
     `${HISTORY_URL}/history/get_actions?${params}`,

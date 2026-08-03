@@ -8,6 +8,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/css/main.css">
+  <script src="https://unpkg.com/lightweight-charts@4.2.0/dist/lightweight-charts.standalone.production.min.js"></script>
 </head>
 <body>
 
@@ -492,10 +493,38 @@
       <section id="section-map-assets" class="section">
         <div class="page-header">
           <div>
-            <h2 class="page-title">Map Asset Activity</h2>
-            <p class="page-subtitle">On-chain NFT mints, secondary sales, and active listings for decorations, seeds, ornaments &amp; uppies</p>
+            <h2 class="page-title">Map Asset Market</h2>
+            <p class="page-subtitle">Price history, current listings, and on-chain activity for NFT map assets</p>
           </div>
           <button class="btn btn--ghost btn--sm" id="map-assets-refresh">Refresh</button>
+        </div>
+
+        <!-- Market Overview KPI Strip -->
+        <div class="stats-grid" id="ma-overview" style="margin-bottom:1.25rem">
+          <div class="stat-card">
+            <div class="stat-icon stat-icon--primary">
+              <svg viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm1-11a1 1 0 10-2 0v2H7a1 1 0 100 2h2v2a1 1 0 102 0v-2h2a1 1 0 100-2h-2V7z" clip-rule="evenodd"/></svg>
+            </div>
+            <div class="stat-content"><div class="stat-label">Mints Today</div><div class="stat-value" id="ma-kpi-mints">—</div></div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-icon stat-icon--accent">
+              <svg viewBox="0 0 20 20" fill="currentColor"><path d="M8.433 7.418c.155-.103.346-.196.567-.267v1.698a2.305 2.305 0 01-.567-.267C8.07 8.34 8 8.114 8 8c0-.114.07-.34.433-.582zM11 12.849v-1.698c.22.071.412.164.567.267.364.243.433.468.433.582 0 .114-.07.34-.433.582a2.305 2.305 0 01-.567.267z"/><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm1-13a1 1 0 10-2 0v.092a4.535 4.535 0 00-1.676.662C6.602 6.234 6 7.009 6 8c0 .99.602 1.765 1.324 2.246.48.32 1.054.545 1.676.662v1.941c-.391-.127-.68-.317-.843-.504a1 1 0 10-1.51 1.31c.562.649 1.413 1.076 2.353 1.253V15a1 1 0 102 0v-.092a4.535 4.535 0 001.676-.662C13.398 13.766 14 12.991 14 12c0-.99-.602-1.765-1.324-2.246A4.535 4.535 0 0011 9.092V7.151c.391.127.68.317.843.504a1 1 0 101.511-1.31c-.563-.649-1.413-1.076-2.354-1.253V5z" clip-rule="evenodd"/></svg>
+            </div>
+            <div class="stat-content"><div class="stat-label">Sales Today</div><div class="stat-value" id="ma-kpi-sales">—</div></div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-icon stat-icon--success">
+              <svg viewBox="0 0 20 20" fill="currentColor"><path d="M2 11a1 1 0 011-1h2a1 1 0 011 1v5a1 1 0 01-1 1H3a1 1 0 01-1-1v-5zm6-4a1 1 0 011-1h2a1 1 0 011 1v9a1 1 0 01-1 1H9a1 1 0 01-1-1V7zm6-3a1 1 0 011-1h2a1 1 0 011 1v12a1 1 0 01-1 1h-2a1 1 0 01-1-1V4z"/></svg>
+            </div>
+            <div class="stat-content"><div class="stat-label">Avg Price (7d)</div><div class="stat-value stat-value--sm" id="ma-kpi-avg">—</div></div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-icon" style="background:var(--warning-glow);color:var(--accent-lt)">
+              <svg viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M3 3a1 1 0 000 2v8a2 2 0 002 2h2.586l-1.293 1.293a1 1 0 101.414 1.414L10 15.414l2.293 2.293a1 1 0 001.414-1.414L12.414 15H15a2 2 0 002-2V5a1 1 0 100-2H3zm11 4a1 1 0 10-2 0v4a1 1 0 102 0V7zm-3 1a1 1 0 10-2 0v3a1 1 0 102 0V8zM8 9a1 1 0 00-2 0v2a1 1 0 102 0V9z" clip-rule="evenodd"/></svg>
+            </div>
+            <div class="stat-content"><div class="stat-label">Recent Listings</div><div class="stat-value" id="ma-kpi-listings">—</div></div>
+          </div>
         </div>
 
         <!-- Filters -->
@@ -527,13 +556,86 @@
 
         <!-- Tab bar -->
         <div class="tab-bar" style="margin-bottom:1rem">
-          <button class="tab-btn active" data-ma-tab="mints">Recent Mints</button>
-          <button class="tab-btn" data-ma-tab="sales">Recent Sales</button>
+          <button class="tab-btn active" data-ma-tab="chart">Price Chart</button>
           <button class="tab-btn" data-ma-tab="listings">Active Listings</button>
+          <button class="tab-btn" data-ma-tab="mints">Recent Mints</button>
+          <button class="tab-btn" data-ma-tab="sales">Recent Sales</button>
+        </div>
+
+        <!-- Price Chart tab -->
+        <div id="ma-tab-chart" class="ma-tab-panel">
+          <div class="card">
+            <div class="card-header" style="flex-wrap:wrap;gap:0.5rem">
+              <h3 class="card-title">Price History</h3>
+              <div style="display:flex;gap:0.5rem;align-items:center;flex-wrap:wrap">
+                <select id="ma-nft-name" style="font-size:0.8rem;padding:0.3rem 0.6rem;background:var(--bg-elevated);border:1px solid var(--border);border-radius:var(--radius);color:var(--text);min-width:200px">
+                  <option value="">Select NFT type…</option>
+                </select>
+                <select id="ma-period" style="font-size:0.8rem;padding:0.3rem 0.6rem;background:var(--bg-elevated);border:1px solid var(--border);border-radius:var(--radius);color:var(--text)">
+                  <option value="7">7 days</option>
+                  <option value="30" selected>30 days</option>
+                  <option value="90">90 days</option>
+                </select>
+              </div>
+            </div>
+            <div class="card-body">
+              <div id="ma-chart-container" style="height:320px;position:relative">
+                <div id="ma-chart-placeholder" style="display:flex;align-items:center;justify-content:center;height:100%;color:var(--text-muted);font-size:0.875rem;flex-direction:column;gap:0.5rem">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="width:36px;height:36px;opacity:0.3"><path stroke-linecap="round" stroke-linejoin="round" d="M3 13.125C3 12.504 3.504 12 4.125 12h2.25c.621 0 1.125.504 1.125 1.125v6.75C7.5 20.496 6.996 21 6.375 21h-2.25A1.125 1.125 0 013 19.875v-6.75zM9.75 8.625c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125v11.25c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 01-1.125-1.125V8.625zM16.5 4.125c0-.621.504-1.125 1.125-1.125h2.25C20.496 3 21 3.504 21 4.125v15.75c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 01-1.125-1.125V4.125z"/></svg>
+                  <p id="ma-chart-msg" style="margin:0;font-size:0.875rem">Select an NFT type above to view price history</p>
+                </div>
+              </div>
+              <div id="ma-chart-stats" class="hidden" style="display:grid;grid-template-columns:repeat(4,1fr);gap:1rem;padding:1rem 0 0;border-top:1px solid var(--border);margin-top:0.75rem">
+                <div style="text-align:center">
+                  <div style="font-size:0.7rem;color:var(--text-muted);font-weight:500;margin-bottom:2px">AVG PRICE</div>
+                  <div id="ma-stat-avg" style="font-weight:700;color:var(--primary-lt);font-family:'Space Grotesk',sans-serif">—</div>
+                </div>
+                <div style="text-align:center">
+                  <div style="font-size:0.7rem;color:var(--text-muted);font-weight:500;margin-bottom:2px">LOWEST</div>
+                  <div id="ma-stat-min" style="font-weight:700;color:var(--success);font-family:'Space Grotesk',sans-serif">—</div>
+                </div>
+                <div style="text-align:center">
+                  <div style="font-size:0.7rem;color:var(--text-muted);font-weight:500;margin-bottom:2px">HIGHEST</div>
+                  <div id="ma-stat-max" style="font-weight:700;color:var(--accent-lt);font-family:'Space Grotesk',sans-serif">—</div>
+                </div>
+                <div style="text-align:center">
+                  <div style="font-size:0.7rem;color:var(--text-muted);font-weight:500;margin-bottom:2px">TOTAL TRADES</div>
+                  <div id="ma-stat-trades" style="font-weight:700;font-family:'Space Grotesk',sans-serif">—</div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Listings tab -->
+        <div id="ma-tab-listings" class="ma-tab-panel hidden">
+          <div class="card">
+            <div class="card-header">
+              <h3 class="card-title">Active UPX Listings</h3>
+              <span class="badge" id="ma-listings-count">—</span>
+            </div>
+            <div class="card-body card-body--flush" style="max-height:500px;overflow-y:auto">
+              <table class="table">
+                <thead>
+                  <tr>
+                    <th>NFT ID</th>
+                    <th>Seller (EOS)</th>
+                    <th style="text-align:right">Price (UPX)</th>
+                    <th style="text-align:right">vs 7d Avg</th>
+                    <th>Listed At</th>
+                    <th>Txn</th>
+                  </tr>
+                </thead>
+                <tbody id="ma-listings-body">
+                  <tr class="table-empty"><td colspan="6">Loading…</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
         </div>
 
         <!-- Mints tab -->
-        <div id="ma-tab-mints" class="ma-tab-panel">
+        <div id="ma-tab-mints" class="ma-tab-panel hidden">
           <div class="card">
             <div class="card-header">
               <h3 class="card-title">Recent Primary Mints</h3>
@@ -579,32 +681,6 @@
                 </thead>
                 <tbody id="ma-sales-body">
                   <tr class="table-empty"><td colspan="6">Loading…</td></tr>
-                </tbody>
-              </table>
-            </div>
-          </div>
-        </div>
-
-        <!-- Listings tab -->
-        <div id="ma-tab-listings" class="ma-tab-panel hidden">
-          <div class="card">
-            <div class="card-header">
-              <h3 class="card-title">Active UPX Listings</h3>
-              <span class="badge" id="ma-listings-count">—</span>
-            </div>
-            <div class="card-body card-body--flush" style="max-height:500px;overflow-y:auto">
-              <table class="table">
-                <thead>
-                  <tr>
-                    <th>NFT ID</th>
-                    <th>Seller (EOS)</th>
-                    <th style="text-align:right">Price (UPX)</th>
-                    <th>Listed At</th>
-                    <th>Txn</th>
-                  </tr>
-                </thead>
-                <tbody id="ma-listings-body">
-                  <tr class="table-empty"><td colspan="5">Loading…</td></tr>
                 </tbody>
               </table>
             </div>
