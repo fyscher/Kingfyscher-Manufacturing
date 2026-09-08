@@ -54,6 +54,13 @@ const api = {
   getPropertyPurchases(propertyId) {
     return fetch(`/api/upland/appchain/purchases/property/${propertyId}?limit=10`).then(r => r.json());
   },
+
+  uplandAuthInit(token) {
+    return fetch('/api/upland/auth/init', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}` },
+    }).then(r => r.json());
+  },
 };
 
 /* ── State ───────────────────────────────────────────────── */
@@ -88,6 +95,13 @@ const modalUsername     = $('modal-username');
 const modalConfirm      = $('modal-confirm');
 const modalCancel       = $('modal-cancel');
 const manageUsersBtn    = $('manage-users-btn');
+const uplandConnectCard     = $('upland-connect-card');
+const uplandConnectStatus   = $('upland-connect-status');
+const uplandConnectBtn      = $('upland-connect-btn');
+const uplandConnectCodeBox  = $('upland-connect-code-box');
+const uplandConnectCode     = $('upland-connect-code');
+const uplandConnectCheckBtn = $('upland-connect-check-btn');
+const uplandConnectShortcut = $('upland-connect-shortcut');
 
 /* ── Helpers ─────────────────────────────────────────────── */
 function showAlert(el, msg) {
@@ -109,6 +123,12 @@ function setLoading(btn, on) {
 
 function avatar(name) {
   return (name || '?')[0].toUpperCase();
+}
+
+function gongBadge(user) {
+  return user && user.hasKingfyscherGong
+    ? '<span class="badge badge--gong" title="Owns a Kingfyscher Gong">Gong</span>'
+    : '';
 }
 
 /* ── Navigation ──────────────────────────────────────────── */
@@ -167,6 +187,7 @@ function renderUsers() {
     const empty4 = '<tr class="table-empty"><td colspan="4">No users yet</td></tr>';
     dashboardUsersBody.innerHTML = empty3;
     usersTableBody.innerHTML     = empty4;
+    renderUplandConnectStatus(null);
     return;
   }
 
@@ -175,7 +196,7 @@ function renderUsers() {
       <td>
         <div class="user-cell">
           <div class="user-cell-av">${avatar(u.username)}</div>
-          ${escHtml(u.username)}
+          ${escHtml(u.username)}${gongBadge(u)}
         </div>
       </td>
       <td>${escHtml(u.name || '—')}</td>
@@ -188,7 +209,7 @@ function renderUsers() {
       <td>
         <div class="user-cell">
           <div class="user-cell-av">${avatar(u.username)}</div>
-          ${escHtml(u.username)}
+          ${escHtml(u.username)}${gongBadge(u)}
         </div>
       </td>
       <td>${escHtml(u.name || '—')}</td>
@@ -207,7 +228,53 @@ function renderUsers() {
       </td>
     </tr>
   `).join('');
+
+  const me = state.users.find(u => u.username === state.username);
+  sidebarUsername.innerHTML = `${escHtml(state.username || 'User')}${gongBadge(me)}`;
+  renderUplandConnectStatus(me);
 }
+
+/* ── Upland account connect (OTP) ─────────────────────────── */
+function renderUplandConnectStatus(me) {
+  if (!me) {
+    uplandConnectStatus.textContent = 'Loading…';
+    return;
+  }
+
+  if (me.uplandUserId) {
+    uplandConnectStatus.innerHTML = `Connected as <strong>${escHtml(me.uplandUserId)}</strong>${gongBadge(me)}`;
+    uplandConnectBtn.classList.add('hidden');
+    uplandConnectCodeBox.classList.add('hidden');
+  } else {
+    uplandConnectStatus.textContent = 'Not connected — link your Upland account to be eligible for perks tied to what you own in-game.';
+    uplandConnectBtn.classList.remove('hidden');
+  }
+}
+
+uplandConnectBtn.addEventListener('click', async () => {
+  setLoading(uplandConnectBtn, true);
+  try {
+    const result = await api.uplandAuthInit(state.token);
+    if (result.code) {
+      uplandConnectCode.textContent = result.code;
+      uplandConnectCodeBox.classList.remove('hidden');
+    } else {
+      showAlert(uplandConnectStatus, result.error || 'Failed to start connection');
+    }
+  } catch {
+    uplandConnectStatus.textContent = 'Failed to start connection. Try again.';
+  } finally {
+    setLoading(uplandConnectBtn, false);
+  }
+});
+
+uplandConnectCheckBtn.addEventListener('click', async () => {
+  await loadUsers();
+});
+
+uplandConnectShortcut.addEventListener('click', () => {
+  uplandConnectCard.scrollIntoView({ behavior: 'smooth', block: 'center' });
+});
 
 function escHtml(str) {
   return String(str)

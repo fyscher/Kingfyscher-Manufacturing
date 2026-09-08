@@ -2,6 +2,7 @@ const usersRouter = require("express").Router();
 const bcrypt = require("bcrypt");
 const User = require("../models/user");
 const { userExtractor } = require("../middleware");
+const { hasKingfyscherGong } = require("../utils/kingfyscherGong");
 
 usersRouter.post("/", async (request, response) => {
   const { username, name, password } = request.body;
@@ -19,7 +20,17 @@ usersRouter.post("/", async (request, response) => {
 
 usersRouter.get("/", userExtractor, async (request, response) => {
   const users = await User.find();
-  response.json(users);
+
+  const withFlair = await Promise.all(
+    users.map(async (user) => {
+      if (!user.uplandUserId) return user;
+      const full = await User.findById(user.id);
+      const qualifies = await hasKingfyscherGong(full?.uplandAccessToken);
+      return { ...user, hasKingfyscherGong: qualifies };
+    }),
+  );
+
+  response.json(withFlair);
 });
 
 usersRouter.delete("/:id", userExtractor, async (request, response) => {

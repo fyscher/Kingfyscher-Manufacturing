@@ -691,6 +691,14 @@ body {
   border-color: var(--border);
 }
 
+.badge--gong {
+  background: var(--accent-glow);
+  color: var(--accent-lt);
+  border-color: rgba(252,211,77,0.3);
+  margin-left: 0.4rem;
+  gap: 0.25rem;
+}
+
 /* ============================================================
    TABLES
    ============================================================ */
