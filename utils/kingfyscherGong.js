@@ -23,16 +23,17 @@ async function hasKingfyscherGong(accessToken) {
   let qualifies = false;
   try {
     for (let page = 1; page <= MAX_PAGES; page++) {
-      // Upland's API rejects `categories` as a plain query string value
-      // ("categories must be an array") — rather than depend on an
-      // undocumented array-encoding convention, fetch unfiltered and
-      // check category client-side, same pattern the rest of this app
-      // already uses for chain data.
+      // `categories` must be array-encoded (categories[]=...) — a plain
+      // `categories=outdoordecor` gets rejected with 400 "categories must
+      // be an array". Confirmed directly against Upland's API 2026-09-09;
+      // a real account with 360 total NFTs made the unfiltered/paginated
+      // approach both slow and liable to miss items past MAX_PAGES.
       const params = new URLSearchParams({ currentPage: page, pageSize: PAGE_SIZE });
+      params.append("categories[]", CATEGORY);
       const result = await uplandUserFetch(`/user/assets/nfts?${params}`, accessToken);
       const items = result?.results || [];
 
-      if (items.some((i) => i.category === CATEGORY && (i.name || "").trim().toLowerCase() === DISPLAY_NAME)) {
+      if (items.some((i) => (i.name || "").trim().toLowerCase() === DISPLAY_NAME)) {
         qualifies = true;
         break;
       }
