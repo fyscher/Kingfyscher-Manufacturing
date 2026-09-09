@@ -1,6 +1,11 @@
 const express = require("express");
 const path = require("path");
 const app = express();
+
+// Fly's proxy sits in front of this app and sets X-Forwarded-For with the
+// real client IP — trust exactly that one hop so express-rate-limit (and
+// anything else reading req.ip) sees the real client, not the proxy.
+app.set("trust proxy", 1);
 const usersRouter = require("./controllers/users");
 const loginRouter = require("./controllers/login");
 const uplandRouter = require("./controllers/upland_api");
