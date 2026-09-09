@@ -148,6 +148,7 @@ const uplandConnectBtn      = $('upland-connect-btn');
 const uplandConnectCodeBox  = $('upland-connect-code-box');
 const uplandConnectCode     = $('upland-connect-code');
 const uplandConnectCheckBtn = $('upland-connect-check-btn');
+const uplandConnectNewCodeBtn = $('upland-connect-new-code-btn');
 const uplandConnectShortcut = $('upland-connect-shortcut');
 const accountEmailForm   = $('account-email-form');
 const accountEmailInput  = $('account-email-input');
@@ -332,29 +333,46 @@ function renderUplandConnectStatus(me) {
     uplandConnectCodeBox.classList.add('hidden');
   } else {
     uplandConnectStatus.textContent = 'Not connected — link your Upland account to be eligible for perks tied to what you own in-game.';
-    uplandConnectBtn.classList.remove('hidden');
+    // Only show the primary button if no code is currently pending — a
+    // second click here used to silently regenerate the code and strand
+    // whatever code the user had already copied into Upland.
+    if (uplandConnectCodeBox.classList.contains('hidden')) {
+      uplandConnectBtn.classList.remove('hidden');
+    }
   }
 }
 
-uplandConnectBtn.addEventListener('click', async () => {
-  setLoading(uplandConnectBtn, true);
+async function requestUplandCode(btn) {
+  setLoading(btn, true);
   try {
     const result = await api.uplandAuthInit(state.token);
     if (result.code) {
       uplandConnectCode.textContent = result.code;
       uplandConnectCodeBox.classList.remove('hidden');
+      uplandConnectBtn.classList.add('hidden');
     } else {
       showAlert(uplandConnectStatus, result.error || 'Failed to start connection');
     }
   } catch {
     uplandConnectStatus.textContent = 'Failed to start connection. Try again.';
   } finally {
-    setLoading(uplandConnectBtn, false);
+    setLoading(btn, false);
   }
-});
+}
+
+uplandConnectBtn.addEventListener('click', () => requestUplandCode(uplandConnectBtn));
+uplandConnectNewCodeBtn.addEventListener('click', () => requestUplandCode(uplandConnectNewCodeBtn));
 
 uplandConnectCheckBtn.addEventListener('click', async () => {
+  setLoading(uplandConnectCheckBtn, true);
+  const wasConnected = state.users.find(u => u.username === state.username)?.uplandUserId;
   await loadUsers();
+  const nowConnected = state.users.find(u => u.username === state.username)?.uplandUserId;
+  setLoading(uplandConnectCheckBtn, false);
+  if (!wasConnected && !nowConnected) {
+    uplandConnectCheckBtn.textContent = 'Still not connected — try again';
+    setTimeout(() => { uplandConnectCheckBtn.textContent = "I've entered it — check connection"; }, 3000);
+  }
 });
 
 uplandConnectShortcut.addEventListener('click', () => {
