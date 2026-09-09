@@ -12,18 +12,25 @@ authRouter.post("/init", userExtractor, async (req, res) => {
 });
 
 authRouter.post("/webhooks", async (req, res) => {
-  const { type, userId } = req.body;
+  // Upland's actual webhook payload nests everything but `type` under
+  // `data` — e.g. { type: "AuthenticationSuccess", data: { code, userId,
+  // accessToken } }. This was previously destructured straight off the
+  // top-level body, so code/userId/accessToken were always undefined and
+  // every webhook silently no-opped. Confirmed against Upland's own docs
+  // and against real webhook traffic (fly logs) 2026-09-09.
+  const { type, data = {} } = req.body;
+  const { userId } = data;
   console.log(`Upland webhook received: type=${type}${userId ? ` userId=${userId}` : ""}`);
 
   switch (type) {
     case "AuthenticationSuccess": {
-      const { code, accessToken } = req.body;
+      const { code, accessToken } = data;
       const user = await User.findOne({ uplandConnectionCode: code });
       if (user) {
         await User.update(user.id, {
           uplandUserId: userId,
           uplandAccessToken: accessToken,
-          uplandConnectedAt: new Date(),
+          uplandConnectedAt: new Date().toISOString(),
           uplandConnectionCode: null,
         });
         console.log(`Upland account linked for user ${user.username}`);
