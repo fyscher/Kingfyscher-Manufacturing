@@ -15,7 +15,7 @@
   "type": "commonjs",
   "main": "index.js",
   "scripts": {
-    "test": "set -a && . ./.env && set +a && NODE_ENV=test node --test",
+    "test": "[ -f .env ] && set -a && . ./.env && set +a; NODE_ENV=test node --test",
     "start": "set -a && . ./.env && set +a && nodemon index.js"
   },
   "dependencies": {
