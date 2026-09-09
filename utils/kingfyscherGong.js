@@ -23,21 +23,23 @@ async function hasKingfyscherGong(accessToken) {
   let qualifies = false;
   try {
     for (let page = 1; page <= MAX_PAGES; page++) {
-      const params = new URLSearchParams({
-        currentPage: page,
-        pageSize: PAGE_SIZE,
-        categories: CATEGORY,
-      });
+      // Upland's API rejects `categories` as a plain query string value
+      // ("categories must be an array") — rather than depend on an
+      // undocumented array-encoding convention, fetch unfiltered and
+      // check category client-side, same pattern the rest of this app
+      // already uses for chain data.
+      const params = new URLSearchParams({ currentPage: page, pageSize: PAGE_SIZE });
       const result = await uplandUserFetch(`/user/assets/nfts?${params}`, accessToken);
       const items = result?.results || [];
 
-      if (items.some((i) => (i.name || "").trim().toLowerCase() === DISPLAY_NAME)) {
+      if (items.some((i) => i.category === CATEGORY && (i.name || "").trim().toLowerCase() === DISPLAY_NAME)) {
         qualifies = true;
         break;
       }
       if (items.length < PAGE_SIZE) break; // reached the last page
     }
-  } catch {
+  } catch (err) {
+    console.error("hasKingfyscherGong check failed:", err.status, JSON.stringify(err.data));
     qualifies = false;
   }
 
