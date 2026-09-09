@@ -106,4 +106,121 @@ describe('when there is initially one user in db', () =>
         assert(result.body.error.includes('Password too short'))
         assert.strictEqual(usersAtEnd.length, usersAtStart.length)
     })
+
+    test('forgot-username returns the matching username for a known name', async () =>
+    {
+        const result = await api
+            .post('/api/users/forgot-username')
+            .set('Content-Type', 'application/json')
+            .send({ name: helper.Fyscher.name })
+            .expect(200)
+            .expect('Content-Type', /application\/json/)
+
+        assert.deepStrictEqual(result.body.usernames, [helper.Fyscher.username])
+    })
+
+    test('forgot-username is case-insensitive', async () =>
+    {
+        const result = await api
+            .post('/api/users/forgot-username')
+            .set('Content-Type', 'application/json')
+            .send({ name: helper.Fyscher.name.toUpperCase() })
+            .expect(200)
+
+        assert.deepStrictEqual(result.body.usernames, [helper.Fyscher.username])
+    })
+
+    test('forgot-username returns an empty list for an unknown name', async () =>
+    {
+        const result = await api
+            .post('/api/users/forgot-username')
+            .set('Content-Type', 'application/json')
+            .send({ name: 'Nobody Here' })
+            .expect(200)
+
+        assert.deepStrictEqual(result.body.usernames, [])
+    })
+
+    test('forgot-username fails without a name', async () =>
+    {
+        const result = await api
+            .post('/api/users/forgot-username')
+            .set('Content-Type', 'application/json')
+            .send({})
+            .expect(400)
+
+        assert(result.body.error.includes('Name is required'))
+    })
+
+    test('forgot-password issues a reset token for a registered email and always returns a generic message', async () =>
+    {
+        await api
+            .post('/api/users')
+            .set('Content-Type', 'application/json')
+            .send({ username: 'emailuser', name: 'Email User', email: 'emailuser@example.com', password: 'testerrr' })
+            .expect(201)
+
+        const result = await api
+            .post('/api/users/forgot-password')
+            .set('Content-Type', 'application/json')
+            .send({ email: 'emailuser@example.com' })
+            .expect(200)
+
+        assert(result.body.message.includes('If that email is registered'))
+
+        const updatedUser = await User.findOne({ email: 'emailuser@example.com' })
+        assert(updatedUser.resetToken)
+        assert(updatedUser.resetTokenExpires)
+    })
+
+    test('forgot-password returns the same generic message for an unregistered email', async () =>
+    {
+        const result = await api
+            .post('/api/users/forgot-password')
+            .set('Content-Type', 'application/json')
+            .send({ email: 'nobody@example.com' })
+            .expect(200)
+
+        assert(result.body.message.includes('If that email is registered'))
+    })
+
+    test('reset-password fails with an invalid token', async () =>
+    {
+        const result = await api
+            .post('/api/users/reset-password')
+            .set('Content-Type', 'application/json')
+            .send({ token: 'not-a-real-token', password: 'newpassword' })
+            .expect(400)
+
+        assert(result.body.error.includes('Invalid or expired'))
+    })
+
+    test('reset-password succeeds with a valid token and updates the password', async () =>
+    {
+        await api
+            .post('/api/users')
+            .set('Content-Type', 'application/json')
+            .send({ username: 'resetuser', name: 'Reset User', email: 'resetuser@example.com', password: 'oldpassword' })
+            .expect(201)
+
+        await api
+            .post('/api/users/forgot-password')
+            .set('Content-Type', 'application/json')
+            .send({ email: 'resetuser@example.com' })
+            .expect(200)
+
+        const { resetToken } = await User.findOne({ email: 'resetuser@example.com' })
+
+        await api
+            .post('/api/users/reset-password')
+            .set('Content-Type', 'application/json')
+            .send({ token: resetToken, password: 'newpassword' })
+            .expect(200)
+
+        await api
+            .post('/api/login')
+            .set('Content-Type', 'application/json')
+            .send({ username: 'resetuser', password: 'newpassword' })
+            .expect(200)
+    })
 })

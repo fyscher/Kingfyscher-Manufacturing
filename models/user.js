@@ -1,8 +1,9 @@
 const Database = require("better-sqlite3");
 const path = require("path");
 const { randomUUID } = require("crypto");
+const config = require("../utils/config");
 
-const db = new Database(path.join(__dirname, "../dev.db"));
+const db = new Database(config.DB_PATH || path.join(__dirname, "../dev.db"));
 
 db.exec(`
   CREATE TABLE IF NOT EXISTS users (
@@ -10,6 +11,9 @@ db.exec(`
     username TEXT NOT NULL UNIQUE,
     name TEXT NOT NULL,
     password_hash TEXT NOT NULL,
+    email TEXT,
+    reset_token TEXT,
+    reset_token_expires TEXT,
     upland_user_id TEXT,
     upland_access_token TEXT,
     upland_connected_at TEXT,
@@ -17,9 +21,22 @@ db.exec(`
   )
 `);
 
+for (const migration of [
+  "ALTER TABLE users ADD COLUMN email TEXT",
+  "ALTER TABLE users ADD COLUMN reset_token TEXT",
+  "ALTER TABLE users ADD COLUMN reset_token_expires TEXT",
+]) {
+  try {
+    db.exec(migration);
+  } catch (error) {
+    if (!/duplicate column name/i.test(error.message)) throw error;
+  }
+}
+
 const strip = (row) => {
   if (!row) return null;
   const obj = { id: row.id, username: row.username, name: row.name };
+  if (row.email) obj.email = row.email;
   if (row.upland_user_id) obj.uplandUserId = row.upland_user_id;
   if (row.upland_connected_at) obj.uplandConnectedAt = row.upland_connected_at;
   return obj;
@@ -32,6 +49,9 @@ const toFull = (row) => {
     username: row.username,
     name: row.name,
     passwordHash: row.password_hash,
+    email: row.email ?? undefined,
+    resetToken: row.reset_token ?? undefined,
+    resetTokenExpires: row.reset_token_expires ?? undefined,
     uplandUserId: row.upland_user_id ?? undefined,
     uplandAccessToken: row.upland_access_token ?? undefined,
     uplandConnectedAt: row.upland_connected_at ?? undefined,
@@ -48,6 +68,8 @@ const User = {
     const [col, val] = Object.entries(filter)[0];
     const colMap = {
       username: "username",
+      email: "email",
+      resetToken: "reset_token",
       uplandConnectionCode: "upland_connection_code",
       uplandUserId: "upland_user_id",
     };
@@ -62,9 +84,9 @@ const User = {
   async create(fields) {
     const id = randomUUID();
     db.prepare(`
-      INSERT INTO users (id, username, name, password_hash)
-      VALUES (?, ?, ?, ?)
-    `).run(id, fields.username, fields.name, fields.passwordHash);
+      INSERT INTO users (id, username, name, password_hash, email)
+      VALUES (?, ?, ?, ?, ?)
+    `).run(id, fields.username, fields.name, fields.passwordHash, fields.email || null);
     return strip(db.prepare("SELECT * FROM users WHERE id = ?").get(id));
   },
 
@@ -78,6 +100,9 @@ const User = {
 
   async update(id, fields) {
     const colMap = {
+      passwordHash: "password_hash",
+      resetToken: "reset_token",
+      resetTokenExpires: "reset_token_expires",
       uplandUserId: "upland_user_id",
       uplandAccessToken: "upland_access_token",
       uplandConnectedAt: "upland_connected_at",

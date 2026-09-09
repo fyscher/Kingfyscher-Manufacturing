@@ -44,6 +44,66 @@
           <span class="btn-spinner hidden"></span>
         </button>
       </form>
+      <button type="button" class="btn-link" id="forgot-username-toggle" style="margin-top:0.75rem;background:none;border:none;color:var(--text-muted);font-size:0.85rem;cursor:pointer;text-decoration:underline">
+        Forgot your username?
+      </button>
+      <form id="forgot-username-form" class="auth-form hidden" style="margin-top:0.75rem">
+        <div class="field">
+          <label for="forgot-username-name">Full name</label>
+          <input type="text" id="forgot-username-name" name="name" placeholder="Enter the name on your account" required>
+        </div>
+        <div id="forgot-username-result" class="alert hidden"></div>
+        <button type="submit" class="btn btn--ghost btn--full" id="forgot-username-btn">
+          <span class="btn-text">Look up username</span>
+          <span class="btn-spinner hidden"></span>
+        </button>
+      </form>
+      <button type="button" class="btn-link" id="forgot-password-toggle" style="margin-top:0.5rem;background:none;border:none;color:var(--text-muted);font-size:0.85rem;cursor:pointer;text-decoration:underline">
+        Forgot your password?
+      </button>
+      <form id="forgot-password-form" class="auth-form hidden" style="margin-top:0.75rem">
+        <div class="field">
+          <label for="forgot-password-email">Email</label>
+          <input type="email" id="forgot-password-email" name="email" placeholder="Enter the email on your account" required>
+        </div>
+        <div id="forgot-password-result" class="alert hidden"></div>
+        <button type="submit" class="btn btn--ghost btn--full" id="forgot-password-btn">
+          <span class="btn-text">Send reset link</span>
+          <span class="btn-spinner hidden"></span>
+        </button>
+      </form>
+      <p class="auth-footer">Kingfyscher Manufacturing &copy; 2026</p>
+    </div>
+  </div>
+
+  <!-- Reset Password Screen -->
+  <div id="reset-password-view" class="auth-view hidden">
+    <div class="auth-bg">
+      <div class="auth-orb auth-orb--1"></div>
+      <div class="auth-orb auth-orb--2"></div>
+      <div class="auth-grid"></div>
+    </div>
+    <div class="auth-card">
+      <div class="auth-logo">
+        <img src="/img/logo.jpg" alt="Kingfyscher Manufacturing" class="logo-img" style="height:64px;border-radius:50%">
+        <div class="logo-text">
+          <span class="logo-brand">KINGFYSCHER</span>
+          <span class="logo-sub">MANUFACTURING</span>
+        </div>
+      </div>
+      <h1 class="auth-title">Set a new password</h1>
+      <p class="auth-desc">Choose a new password for your account</p>
+      <form id="reset-password-form" class="auth-form">
+        <div class="field">
+          <label for="reset-password-input">New password</label>
+          <input type="password" id="reset-password-input" placeholder="Min. 3 characters" required>
+        </div>
+        <div id="reset-password-error" class="alert alert--error hidden"></div>
+        <button type="submit" class="btn btn--primary btn--full" id="reset-password-btn">
+          <span class="btn-text">Update password</span>
+          <span class="btn-spinner hidden"></span>
+        </button>
+      </form>
       <p class="auth-footer">Kingfyscher Manufacturing &copy; 2026</p>
     </div>
   </div>
@@ -275,6 +335,10 @@
               <div class="field">
                 <label for="new-name">Full Name</label>
                 <input type="text" id="new-name" placeholder="Full name">
+              </div>
+              <div class="field">
+                <label for="new-email">Email</label>
+                <input type="email" id="new-email" placeholder="Needed for password reset">
               </div>
               <div class="field">
                 <label for="new-password">Password</label>

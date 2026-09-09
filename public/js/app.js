@@ -61,6 +61,30 @@ const api = {
       headers: { Authorization: `Bearer ${token}` },
     }).then(r => r.json());
   },
+
+  forgotUsername(name) {
+    return fetch('/api/users/forgot-username', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name }),
+    }).then(r => r.json());
+  },
+
+  forgotPassword(email) {
+    return fetch('/api/users/forgot-password', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email }),
+    }).then(r => r.json());
+  },
+
+  resetPassword(token, password) {
+    return fetch('/api/users/reset-password', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ token, password }),
+    }).then(r => r.json());
+  },
 };
 
 /* ── State ───────────────────────────────────────────────── */
@@ -78,6 +102,18 @@ const appView           = $('app-view');
 const loginForm         = $('login-form');
 const authError         = $('auth-error');
 const loginBtn          = $('login-btn');
+const forgotUsernameToggle = $('forgot-username-toggle');
+const forgotUsernameForm   = $('forgot-username-form');
+const forgotUsernameResult = $('forgot-username-result');
+const forgotUsernameBtn    = $('forgot-username-btn');
+const forgotPasswordToggle = $('forgot-password-toggle');
+const forgotPasswordForm   = $('forgot-password-form');
+const forgotPasswordResult = $('forgot-password-result');
+const forgotPasswordBtn    = $('forgot-password-btn');
+const resetPasswordView    = $('reset-password-view');
+const resetPasswordForm    = $('reset-password-form');
+const resetPasswordError   = $('reset-password-error');
+const resetPasswordBtn     = $('reset-password-btn');
 const logoutBtn         = $('logout-btn');
 const sidebarUsername   = $('sidebar-username');
 const userAvatar        = $('user-avatar');
@@ -147,15 +183,23 @@ function navigateTo(section) {
 function showAuth() {
   authView.classList.remove('hidden');
   appView.classList.add('hidden');
+  resetPasswordView.classList.add('hidden');
 }
 
 function showApp() {
   authView.classList.add('hidden');
   appView.classList.remove('hidden');
+  resetPasswordView.classList.add('hidden');
   sidebarUsername.textContent = state.username || 'User';
   userAvatar.textContent      = avatar(state.username);
   loadUsers();
   navigateTo('dashboard');
+}
+
+function showResetPassword() {
+  authView.classList.add('hidden');
+  appView.classList.add('hidden');
+  resetPasswordView.classList.remove('hidden');
 }
 
 function logout() {
@@ -312,6 +356,88 @@ loginForm.addEventListener('submit', async e => {
   }
 });
 
+/* ── Event: forgot username ──────────────────────────────── */
+forgotUsernameToggle.addEventListener('click', () => {
+  forgotUsernameForm.classList.toggle('hidden');
+  hideAlert(forgotUsernameResult);
+});
+
+forgotUsernameForm.addEventListener('submit', async e => {
+  e.preventDefault();
+  hideAlert(forgotUsernameResult);
+  setLoading(forgotUsernameBtn, true);
+
+  const name = document.getElementById('forgot-username-name').value.trim();
+
+  try {
+    const result = await api.forgotUsername(name);
+    const usernames = result.usernames || [];
+    forgotUsernameResult.classList.remove('alert--error');
+    if (usernames.length) {
+      showAlert(forgotUsernameResult, `Username${usernames.length > 1 ? 's' : ''}: ${usernames.join(', ')}`);
+    } else {
+      forgotUsernameResult.classList.add('alert--error');
+      showAlert(forgotUsernameResult, 'No account found with that name.');
+    }
+  } catch {
+    forgotUsernameResult.classList.add('alert--error');
+    showAlert(forgotUsernameResult, 'Connection error — please try again.');
+  } finally {
+    setLoading(forgotUsernameBtn, false);
+  }
+});
+
+/* ── Event: forgot password ──────────────────────────────── */
+forgotPasswordToggle.addEventListener('click', () => {
+  forgotPasswordForm.classList.toggle('hidden');
+  hideAlert(forgotPasswordResult);
+});
+
+forgotPasswordForm.addEventListener('submit', async e => {
+  e.preventDefault();
+  hideAlert(forgotPasswordResult);
+  setLoading(forgotPasswordBtn, true);
+
+  const email = document.getElementById('forgot-password-email').value.trim();
+
+  try {
+    const result = await api.forgotPassword(email);
+    forgotPasswordResult.classList.remove('alert--error');
+    showAlert(forgotPasswordResult, result.message || 'If that email is registered, a reset link has been sent.');
+    forgotPasswordForm.reset();
+  } catch {
+    forgotPasswordResult.classList.add('alert--error');
+    showAlert(forgotPasswordResult, 'Connection error — please try again.');
+  } finally {
+    setLoading(forgotPasswordBtn, false);
+  }
+});
+
+/* ── Event: reset password ───────────────────────────────── */
+resetPasswordForm.addEventListener('submit', async e => {
+  e.preventDefault();
+  hideAlert(resetPasswordError);
+  setLoading(resetPasswordBtn, true);
+
+  const params   = new URLSearchParams(window.location.search);
+  const token    = params.get('reset_token');
+  const password = document.getElementById('reset-password-input').value;
+
+  try {
+    const result = await api.resetPassword(token, password);
+    if (result.error) {
+      showAlert(resetPasswordError, result.error);
+      return;
+    }
+    window.history.replaceState({}, '', window.location.pathname);
+    showAuth();
+  } catch {
+    showAlert(resetPasswordError, 'Connection error — please try again.');
+  } finally {
+    setLoading(resetPasswordBtn, false);
+  }
+});
+
 /* ── Event: logout ───────────────────────────────────────── */
 logoutBtn.addEventListener('click', logout);
 
@@ -349,10 +475,11 @@ createUserForm.addEventListener('submit', async e => {
 
   const username = document.getElementById('new-username').value.trim();
   const name     = document.getElementById('new-name').value.trim();
+  const email    = document.getElementById('new-email').value.trim();
   const password = document.getElementById('new-password').value;
 
   try {
-    const result = await api.createUser({ username, name, password }, state.token);
+    const result = await api.createUser({ username, name, email, password }, state.token);
     if (result.error) {
       showAlert(createUserError, result.error);
       return;
@@ -1138,7 +1265,9 @@ document.querySelector('.nav-item[data-section="map-assets"]').addEventListener(
 });
 
 /* ── Init ────────────────────────────────────────────────── */
-if (state.token) {
+if (new URLSearchParams(window.location.search).get('reset_token')) {
+  showResetPassword();
+} else if (state.token) {
   showApp();
 } else {
   showAuth();

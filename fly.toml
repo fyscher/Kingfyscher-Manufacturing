@@ -3,6 +3,11 @@ primary_region = 'sea'
 
 [env]
   PORT = '3001'
+  DB_PATH = '/data/dev.db'
+
+[mounts]
+  source = 'data'
+  destination = '/data'
 
 [http_service]
   internal_port = 3001
