@@ -1,5 +1,5 @@
 app = 'kingfyscher-manufacturing'
-primary_region = 'sea'
+primary_region = 'sjc'
 
 [env]
   PORT = '3001'

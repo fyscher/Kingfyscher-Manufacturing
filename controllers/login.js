@@ -3,8 +3,9 @@ const bcrypt = require("bcrypt");
 const loginRouter = require("express").Router();
 const User = require("../models/user");
 const config = require("../utils/config");
+const { authRateLimiter } = require("../middleware");
 
-loginRouter.post("/", async (req, res) => {
+loginRouter.post("/", authRateLimiter, async (req, res) => {
   const { username, password } = req.body;
   const user = await User.findOne({ username });
   const passwordCorrect =

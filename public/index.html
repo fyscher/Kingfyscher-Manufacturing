@@ -304,6 +304,22 @@
                 </div>
               </div>
             </div>
+
+            <div class="card" id="account-email-card">
+              <div class="card-header">
+                <h3 class="card-title">Account Email</h3>
+              </div>
+              <div class="card-body">
+                <p style="font-size:0.8rem;color:var(--text-muted);margin:0 0 0.75rem">
+                  Used for password recovery. Not shown anywhere else.
+                </p>
+                <form id="account-email-form" class="inline-form" style="flex-wrap:wrap;gap:0.5rem">
+                  <input type="email" id="account-email-input" placeholder="you@example.com" required style="flex:1;min-width:160px">
+                  <button type="submit" class="btn btn--primary btn--sm" id="account-email-btn">Save</button>
+                </form>
+                <div id="account-email-result" class="alert hidden" style="margin-top:0.6rem"></div>
+              </div>
+            </div>
           </div>
         </div>
       </section>

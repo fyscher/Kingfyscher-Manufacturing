@@ -1,6 +1,16 @@
 const User = require('./models/user')
 const jwt = require('jsonwebtoken')
 const config = require('./utils/config')
+const rateLimit = require('express-rate-limit')
+
+const authRateLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 10,
+  standardHeaders: true,
+  legacyHeaders: false,
+  skip: () => process.env.NODE_ENV === 'test',
+  message: { error: 'Too many attempts, please try again later' },
+})
 
 const tokenExtractor = async (req, res, next) =>
 {
@@ -41,4 +51,4 @@ const errorHandler = (error, req, res, next) =>
   next(error)
 }
 
-module.exports = { tokenExtractor, userExtractor, errorHandler }
+module.exports = { tokenExtractor, userExtractor, errorHandler, authRateLimiter }

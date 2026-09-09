@@ -2,7 +2,7 @@ const usersRouter = require("express").Router();
 const bcrypt = require("bcrypt");
 const crypto = require("crypto");
 const User = require("../models/user");
-const { userExtractor } = require("../middleware");
+const { userExtractor, authRateLimiter } = require("../middleware");
 const { hasKingfyscherGong } = require("../utils/kingfyscherGong");
 const { sendEmail } = require("../utils/mailer");
 
@@ -46,7 +46,7 @@ usersRouter.post("/forgot-username", async (request, response) => {
   response.json({ usernames });
 });
 
-usersRouter.post("/forgot-password", async (request, response) => {
+usersRouter.post("/forgot-password", authRateLimiter, async (request, response) => {
   const { email } = request.body;
 
   if (!email || !email.trim()) {
@@ -75,7 +75,7 @@ usersRouter.post("/forgot-password", async (request, response) => {
   response.json({ message: "If that email is registered, a reset link has been sent." });
 });
 
-usersRouter.post("/reset-password", async (request, response) => {
+usersRouter.post("/reset-password", authRateLimiter, async (request, response) => {
   const { token, password } = request.body;
 
   if (!token) {
@@ -100,6 +100,25 @@ usersRouter.post("/reset-password", async (request, response) => {
   });
 
   response.json({ message: "Password updated successfully" });
+});
+
+usersRouter.patch("/me", userExtractor, async (request, response) => {
+  const { email } = request.body;
+
+  if (!email || !email.trim()) {
+    return response.status(400).json({ error: "Email is required" });
+  }
+
+  const updated = await User.update(request.user.id, {
+    email: email.trim().toLowerCase(),
+  });
+
+  response.json({
+    id: updated.id,
+    username: updated.username,
+    name: updated.name,
+    email: updated.email,
+  });
 });
 
 usersRouter.get("/", userExtractor, async (request, response) => {

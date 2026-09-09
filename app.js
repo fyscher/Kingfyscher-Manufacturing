@@ -7,12 +7,25 @@ const uplandRouter = require("./controllers/upland_api");
 const middleware = require("./middleware");
 const morgan = require("morgan");
 const cors = require("cors");
+const helmet = require("helmet");
 
-morgan.token("body", (req) => JSON.stringify(req.body));
-
+app.use(
+  helmet({
+    contentSecurityPolicy: {
+      directives: {
+        defaultSrc: ["'self'"],
+        scriptSrc: ["'self'", "https://unpkg.com"],
+        styleSrc: ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"],
+        fontSrc: ["'self'", "https://fonts.gstatic.com"],
+        imgSrc: ["'self'", "data:", "https:"],
+        connectSrc: ["'self'"],
+      },
+    },
+  }),
+);
 app.use(cors());
 app.use(
-  morgan(":method :url :status :res[content-length] - :response-time ms :body"),
+  morgan(":method :url :status :res[content-length] - :response-time ms"),
 );
 app.use(express.static(path.join(__dirname, "public")));
 app.use(express.json());

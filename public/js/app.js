@@ -62,6 +62,17 @@ const api = {
     }).then(r => r.json());
   },
 
+  updateEmail(email, token) {
+    return fetch('/api/users/me', {
+      method: 'PATCH',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({ email }),
+    }).then(r => r.json());
+  },
+
   forgotUsername(name) {
     return fetch('/api/users/forgot-username', {
       method: 'POST',
@@ -138,6 +149,10 @@ const uplandConnectCodeBox  = $('upland-connect-code-box');
 const uplandConnectCode     = $('upland-connect-code');
 const uplandConnectCheckBtn = $('upland-connect-check-btn');
 const uplandConnectShortcut = $('upland-connect-shortcut');
+const accountEmailForm   = $('account-email-form');
+const accountEmailInput  = $('account-email-input');
+const accountEmailBtn    = $('account-email-btn');
+const accountEmailResult = $('account-email-result');
 
 /* ── Helpers ─────────────────────────────────────────────── */
 function showAlert(el, msg) {
@@ -276,7 +291,33 @@ function renderUsers() {
   const me = state.users.find(u => u.username === state.username);
   sidebarUsername.innerHTML = `${escHtml(state.username || 'User')}${gongBadge(me)}`;
   renderUplandConnectStatus(me);
+  if (me && me.email && document.activeElement !== accountEmailInput) {
+    accountEmailInput.value = me.email;
+  }
 }
+
+/* ── Account email ────────────────────────────────────────── */
+accountEmailForm.addEventListener('submit', async e => {
+  e.preventDefault();
+  hideAlert(accountEmailResult);
+  setLoading(accountEmailBtn, true);
+  try {
+    const result = await api.updateEmail(accountEmailInput.value.trim(), state.token);
+    if (result.email) {
+      accountEmailResult.className = 'alert';
+      showAlert(accountEmailResult, 'Email saved.');
+      await loadUsers();
+    } else {
+      accountEmailResult.className = 'alert alert--error';
+      showAlert(accountEmailResult, result.error || 'Failed to save email');
+    }
+  } catch {
+    accountEmailResult.className = 'alert alert--error';
+    showAlert(accountEmailResult, 'Failed to save email');
+  } finally {
+    setLoading(accountEmailBtn, false);
+  }
+});
 
 /* ── Upland account connect (OTP) ─────────────────────────── */
 function renderUplandConnectStatus(me) {

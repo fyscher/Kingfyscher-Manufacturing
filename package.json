@@ -15,7 +15,7 @@
   "type": "commonjs",
   "main": "index.js",
   "scripts": {
-    "test": "node --test",
+    "test": "set -a && . ./.env && set +a && NODE_ENV=test node --test",
     "start": "set -a && . ./.env && set +a && nodemon index.js"
   },
   "dependencies": {
@@ -23,6 +23,8 @@
     "better-sqlite3": "^13.0.2",
     "cors": "^2.8.5",
     "express": "^5.1.0",
+    "express-rate-limit": "^8.7.0",
+    "helmet": "^8.3.0",
     "jsonwebtoken": "^9.0.2",
     "morgan": "^1.10.0"
   },
