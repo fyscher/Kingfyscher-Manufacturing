@@ -24,10 +24,10 @@ const userExtractor = async (req, res, next) =>
 
 const errorHandler = (error, req, res, next) =>
 {
-  if (error.code === '23505') {
-    return res.status(400).json({ error: error.message })
+  if (error.code === '23505' || error.code === 'SQLITE_CONSTRAINT_UNIQUE') {
+    return res.status(400).json({ error: `duplicate value: ${error.message}` })
   }
-  if (error.code === '23514') {
+  if (error.code === '23514' || error.code === 'SQLITE_CONSTRAINT_CHECK') {
     return res.status(400).json({ error: error.message })
   }
 
