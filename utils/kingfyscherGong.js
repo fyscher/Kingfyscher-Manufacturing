@@ -1,10 +1,15 @@
 const { uplandUserFetch } = require("./uplandClient");
 
 // Kingfyscher Gong: Fyscher's Map Asset Factory design, approved 2026-09-05.
-// category=outdoordecor, dGood token_name=jpqvm4gitndu (confirmed on-chain),
-// planned production run of 100. See vault: Upland UGC Research.md
+// category=outdoordecor, planned production run of 100. See vault:
+// Upland UGC Research.md
+//
+// Upland's /user/assets/nfts returns the internal dGood token_name in its
+// `name` field, NOT the human display name ("Kingfyscher Gong" only shows
+// up in the mint memo) — confirmed 2026-09-09 against a real connected
+// account. Match on the real identifier instead.
 const CATEGORY = "outdoordecor";
-const DISPLAY_NAME = "kingfyscher gong";
+const TOKEN_NAME = "jpqvm4gitndu";
 const MAX_PAGES = 5;
 const PAGE_SIZE = 50;
 const CACHE_TTL_MS = 10 * 60_000;
@@ -33,7 +38,7 @@ async function hasKingfyscherGong(accessToken) {
       const result = await uplandUserFetch(`/user/assets/nfts?${params}`, accessToken);
       const items = result?.results || [];
 
-      if (items.some((i) => (i.name || "").trim().toLowerCase() === DISPLAY_NAME)) {
+      if (items.some((i) => i.name === TOKEN_NAME)) {
         qualifies = true;
         break;
       }
