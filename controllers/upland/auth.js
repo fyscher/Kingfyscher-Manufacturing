@@ -12,11 +12,12 @@ authRouter.post("/init", userExtractor, async (req, res) => {
 });
 
 authRouter.post("/webhooks", async (req, res) => {
-  const { type } = req.body;
+  const { type, userId } = req.body;
+  console.log(`Upland webhook received: type=${type}${userId ? ` userId=${userId}` : ""}`);
 
   switch (type) {
     case "AuthenticationSuccess": {
-      const { code, userId, accessToken } = req.body;
+      const { code, accessToken } = req.body;
       const user = await User.findOne({ uplandConnectionCode: code });
       if (user) {
         await User.update(user.id, {
@@ -25,19 +26,22 @@ authRouter.post("/webhooks", async (req, res) => {
           uplandConnectedAt: new Date(),
           uplandConnectionCode: null,
         });
+        console.log(`Upland account linked for user ${user.username}`);
+      } else {
+        console.log("AuthenticationSuccess webhook: no user found with a matching pending connection code (already cleared, or code mismatch)");
       }
       break;
     }
     case "AuthenticationFailure": {
-      const { code } = req.body;
-      const user = await User.findOne({ uplandConnectionCode: code });
-      if (user) {
-        await User.update(user.id, { uplandConnectionCode: null });
-      }
+      // Deliberately leave uplandConnectionCode in place — Upland's OTP entry
+      // allows retry, and a mistyped-then-corrected attempt should still be
+      // able to match against the same pending code (see 2026-09-09 bug: a
+      // failure here was wiping the code before a same-session retry's real
+      // AuthenticationSuccess webhook arrived, silently losing the link).
+      console.log("AuthenticationFailure webhook received, leaving pending connection code intact for retry");
       break;
     }
     case "UserDisconnectedApplication": {
-      const { userId } = req.body;
       const user = await User.findOne({ uplandUserId: userId });
       if (user) {
         await User.update(user.id, {
