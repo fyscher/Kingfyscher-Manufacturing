@@ -22,13 +22,25 @@ userRouter.get(
   },
 );
 
+// GET /api/upland/user/assets/nfts?currentPage=1&pageSize=50&categories=outdoordecor,structornmt&textSearch=
+// One page at a time: asking Upland for every NFT at once ran ~125 s and timed out.
 userRouter.get(
   "/assets/nfts",
   userExtractor,
   requireUplandToken,
   async (req, res) => {
-    const result = await uplandUserFetch("/user/assets/nfts", req.uplandToken);
-    res.json(result);
+    const params = new URLSearchParams({
+      currentPage: String(Math.max(Number.parseInt(req.query.currentPage, 10) || 1, 1)),
+      pageSize: String(Math.min(Math.max(Number.parseInt(req.query.pageSize, 10) || 50, 10), 100)),
+    });
+    // Upland wants categories array-encoded (categories[]=...); a plain value gets a 400.
+    for (const c of String(req.query.categories || "").split(",").filter(Boolean)) params.append("categories[]", c);
+    if (req.query.textSearch) params.set("textSearch", String(req.query.textSearch));
+    try {
+      res.json(await uplandUserFetch(`/user/assets/nfts?${params}`, req.uplandToken));
+    } catch (err) {
+      res.status(502).json({ error: `Upland API error: ${err.status ?? err.message}` });
+    }
   },
 );
 

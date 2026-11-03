@@ -23,8 +23,9 @@ const CATEGORY_LABELS = {
   uppie: "Uppies",
 };
 
-// "Price" for filtering and sorting: the 30-day median sale, else the last sale.
-const PRICE = "COALESCE(median_30d, last_price)";
+// "Price" for filtering and sorting: the cheapest it sold for in 30 days, gifts
+// left out. Designs without a real recent sale sort last and drop out of price filters.
+const PRICE = "floor_30d";
 const SORTS = {
   listed: "listed DESC, escrow DESC, sales_30d DESC",
   cheapest: `${PRICE} IS NULL, ${PRICE} ASC`,
@@ -97,7 +98,7 @@ marketRouter.get("/assets", (req, res) => {
 
   const total = db.prepare(`SELECT COUNT(*) AS n FROM market_designs ${clause}`).get(...args).n;
   const assets = db.prepare(`SELECT category, token_name, display_name, issued, max_supply, escrow, listed, last_price,
-      last_sale_at, sales_7d, sales_30d, median_30d, low_30d, high_30d
+      last_sale_at, sales_7d, sales_30d, median_30d, low_30d, high_30d, floor_30d, image_url
     FROM market_designs ${clause} ORDER BY ${SORTS[sort]}, token_name LIMIT ? OFFSET ?`)
     .all(...args, pageSize, (page - 1) * pageSize)
     .map(a => ({ ...a, categoryLabel: CATEGORY_LABELS[a.category] || a.category }));

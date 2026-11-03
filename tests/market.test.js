@@ -89,11 +89,11 @@ describe("GET /api/upland/market", () => {
     assert.deepStrictEqual(await names("q=street"), ["Street Lamp 100%"], "case-insensitive name search");
     assert.deepStrictEqual(await names("q=%25"), ["Street Lamp 100%"], "a % in the search is literal, not a wildcard");
     assert.deepStrictEqual(await names("listed=1&sort=name"), ["Park Bench", "Red Rose"]);
-    assert.deepStrictEqual(await names("minPrice=50&maxPrice=500"), ["Park Bench"], "price = 30-day median, else last sale");
+    assert.deepStrictEqual(await names("minPrice=50&maxPrice=500"), ["Park Bench"], "price = cheapest real 30-day sale");
     const paged = await get("/api/upland/market/assets?pageSize=1&page=2").expect(200);
     assert.deepStrictEqual([paged.body.pageSize, paged.body.total, paged.body.assets.length], [10, 3, 0], "page size is at least 10");
     const bench = (await get("/api/upland/market/assets?q=bench").expect(200)).body.assets[0];
-    assert.deepStrictEqual([bench.listed, bench.escrow, bench.sales_30d, bench.median_30d, bench.last_price], [2, 4, 3, 120, 120]);
+    assert.deepStrictEqual([bench.listed, bench.escrow, bench.sales_30d, bench.median_30d, bench.floor_30d, bench.last_price], [2, 4, 3, 120, 100, 120]);
   });
 
   test("one design: listings with seller and time, other escrow, sales and daily candles", async () => {

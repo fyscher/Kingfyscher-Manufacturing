@@ -36,7 +36,14 @@ function render(d) {
   mk.$('as-sub').textContent = `${a.categoryLabel} · ${a.issued == null ? '?' : a.issued.toLocaleString()} issued of ${a.max_supply == null ? '?' : a.max_supply.toLocaleString()} max · design id ${a.category}/${a.token_name}`;
   mk.$('as-fresh').textContent = mk.freshness(d);
 
+  if (a.image_url) {
+    const art = mk.$('as-art');
+    art.innerHTML = `<img src="${mk.esc(a.image_url)}" alt="" referrerpolicy="no-referrer">`;
+    art.querySelector('img').addEventListener('error', () => art.classList.add('hidden'));
+    art.classList.remove('hidden');
+  }
   mk.$('as-stat-listed').textContent = d.listed.length.toLocaleString();
+  mk.$('as-stat-floor').innerHTML = mk.price(a.floor_30d);
   mk.$('as-stat-last').innerHTML = a.last_price == null ? '-' : `${mk.price(a.last_price)}<span class="market-note" style="display:block;font-size:0.72rem">${mk.ago(a.last_sale_at)}</span>`;
   mk.$('as-stat-median').innerHTML = mk.price(a.median_30d);
   mk.$('as-stat-sales').textContent = `${a.sales_30d} (${a.sales_7d} this week)`;

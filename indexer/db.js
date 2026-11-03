@@ -93,6 +93,14 @@ CREATE TABLE IF NOT EXISTS market_designs (
   PRIMARY KEY (category, token_name)
 );
 
+-- Where each design's picture lives. No source yet: the design metadata on IPFS
+-- has no hosts (checked 2026-11-03), and the art's URLs on static.upland.me can't
+-- be derived. The browser shows pictures as soon as rows exist.
+CREATE TABLE IF NOT EXISTS design_images (
+  category TEXT NOT NULL, token_name TEXT NOT NULL, image_url TEXT, fetched_at TEXT NOT NULL,
+  PRIMARY KEY (category, token_name)
+);
+
 CREATE TABLE IF NOT EXISTS sync_state (
   feed TEXT PRIMARY KEY, done_until TEXT NOT NULL, updated_at TEXT NOT NULL
 );
@@ -104,6 +112,8 @@ const ADDED_COLUMNS = {
   designs: { base_uri: "TEXT" },
   // Which design a sale was, from nft_items (enrichSales); '' = not a tracked category.
   nft_sales: { dg_category: "TEXT", dg_token: "TEXT" },
+  // The cheapest a design sold for in 30 days with gifts left out, and its picture.
+  market_designs: { floor_30d: "REAL", image_url: "TEXT" },
 };
 
 const INDEXES = `

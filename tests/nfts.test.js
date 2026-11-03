@@ -105,6 +105,8 @@ describe("map asset summary", () => {
     const now = Date.parse("2026-11-02T12:00:00Z");
     db.prepare("INSERT INTO designs (category, token_name, category_name_id, max_supply, issued_supply, current_supply, updated_at, base_uri) VALUES ('outdoordecor', 'bench', '55', 100, 40, 40, 'x', 'https://ipfs.io/ipfs/Qm1')").run();
     db.prepare("INSERT INTO design_names (category_name_id, display_name, updated_at) VALUES ('55', 'Park Bench', 'x')").run();
+    db.prepare("INSERT INTO designs (category, token_name, category_name_id, max_supply, issued_supply, current_supply, updated_at) VALUES ('outdoordecor', 'lamp', '56', 10, 1, 1, 'x')").run();
+    db.prepare("INSERT INTO nft_items (id, category, token_name, serial, in_escrow) VALUES (9, 'outdoordecor', 'lamp', 1, 0)").run();
     const item = db.prepare("INSERT INTO nft_items (id, category, token_name, serial, in_escrow) VALUES (?, 'outdoordecor', 'bench', ?, ?)");
     item.run(1, 1, 1); // listed by alice
     item.run(2, 2, 1); // in escrow since before our history: origin unknown
@@ -116,17 +118,22 @@ describe("map asset summary", () => {
     sale.run("s3", "t3", "2026-10-30T00:00:00.000Z", 100, "3");
     sale.run("s4", "t4", "2026-11-01T00:00:00.000Z", 80, "1");
     sale.run("s5", "t5", "2026-11-01T06:00:00.000Z", 999, "424242"); // an NFT we don't track
+    sale.run("s6", "t6", "2026-10-31T00:00:00.000Z", 1, "3"); // a 1-UPX gift
+    sale.run("s7", "t7", "2026-10-31T00:00:00.000Z", 1, "9"); // the lamp's only sale: a 1-UPX giveaway
 
     assert.strictEqual(enrichSales(db), 0, "no tagging before a snapshot has finished");
     setCheckpoint(db, "snapshot:nfts", "2026-11-02T00:00:00.000Z");
-    assert.strictEqual(enrichSales(db), 5);
+    assert.strictEqual(enrichSales(db), 7);
     assert.strictEqual(enrichSales(db), 0, "tagged sales aren't looked up again");
     refreshMarket(db, { now });
-    const row = db.prepare("SELECT * FROM market_designs").get();
+    const row = db.prepare("SELECT * FROM market_designs WHERE token_name = 'bench'").get();
     assert.deepStrictEqual(
-      [row.display_name, row.escrow, row.listed, row.last_price, row.sales_7d, row.sales_30d, row.median_30d, row.low_30d, row.high_30d],
-      ["Park Bench", 2, 1, 80, 2, 3, 100, 80, 120],
+      [row.display_name, row.escrow, row.listed, row.last_price, row.sales_7d, row.sales_30d, row.median_30d, row.low_30d, row.high_30d, row.floor_30d],
+      ["Park Bench", 2, 1, 80, 3, 4, 90, 1, 120, 80],
+      "the 1-UPX gift shows in the raw low but never in the floor",
     );
+    const lamp = db.prepare("SELECT low_30d, floor_30d FROM market_designs WHERE token_name = 'lamp'").get();
+    assert.deepStrictEqual(lamp, { low_30d: 1, floor_30d: null }, "1-UPX giveaways alone give no price");
   });
 });
 

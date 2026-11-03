@@ -14,10 +14,13 @@
 <body>
   <main class="market-page">
     <div class="market-top">
-      <div>
+      <div style="display:flex;gap:1rem;align-items:center">
+        <div id="as-art" class="asset-card__art hidden" style="width:84px;border-radius:var(--radius)"></div>
+        <div>
         <a class="market-back" href="/market.html">&larr; All map assets</a>
         <h1 class="page-title" id="as-name" style="margin-top:0.35rem">Loading…</h1>
         <p class="page-subtitle" id="as-sub"></p>
+        </div>
       </div>
       <span class="market-meta" id="as-fresh" style="margin:0"></span>
     </div>
@@ -27,6 +30,7 @@
     <div id="as-content" class="hidden">
       <div class="stats-grid" style="margin-bottom:1.25rem">
         <div class="stat-card"><div class="stat-content"><span class="stat-label">For sale now</span><span class="stat-value" id="as-stat-listed">-</span></div></div>
+        <div class="stat-card"><div class="stat-content"><span class="stat-label" title="Lowest sale in 30 days, leaving out gift sales">Cheapest sold · 30 days</span><span class="stat-value" id="as-stat-floor">-</span></div></div>
         <div class="stat-card"><div class="stat-content"><span class="stat-label">Last sale</span><span class="stat-value" id="as-stat-last">-</span></div></div>
         <div class="stat-card"><div class="stat-content"><span class="stat-label">30-day median</span><span class="stat-value" id="as-stat-median">-</span></div></div>
         <div class="stat-card"><div class="stat-content"><span class="stat-label">Sales in 30 days</span><span class="stat-value" id="as-stat-sales">-</span></div></div>

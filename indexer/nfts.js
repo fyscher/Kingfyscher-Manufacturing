@@ -127,6 +127,20 @@ function enrichSales(db) {
 }
 
 const median = sorted => (sorted.length % 2 ? sorted[(sorted.length - 1) / 2] : (sorted[sorted.length / 2 - 1] + sorted[sorted.length / 2]) / 2);
+
+// 1 UPX is a giveaway price, not a market price: of ~120k map-asset resales
+// (Aug-Nov 2026) only 79 fell between 1 and 5 UPX, and 83% of the 6,647 sales
+// at 1 UPX came from a seller handing out that design 3+ times (creators'
+// giveaways, gifts, moves between a player's own accounts). So a 1-UPX sale is
+// never a price, and with 3+ real sales to judge by, a sale under a quarter of
+// their median is treated as a gift too. No real sale: no floor.
+const TOKEN_PRICE = 1;
+const GIFT_SHARE = 0.25;
+function floorOf(recent, history) {
+  const real = history.filter(p => p > TOKEN_PRICE);
+  const ref = real.length >= 3 ? median(real) : null;
+  return recent.find(p => p > TOKEN_PRICE && (ref == null || p >= ref * GIFT_SHARE)) ?? null;
+}
 const round2 = n => Math.round(n * 100) / 100;
 
 /**
@@ -136,8 +150,9 @@ const round2 = n => Math.round(n * 100) / 100;
  */
 function refreshMarket(db, { categories = DEFAULT_CATEGORIES, now = Date.now() } = {}) {
   const marks = categories.map(() => "?").join(", ");
-  const designs = db.prepare(`SELECT d.category, d.token_name, n.display_name, d.issued_supply, d.max_supply, d.base_uri
+  const designs = db.prepare(`SELECT d.category, d.token_name, n.display_name, d.issued_supply, d.max_supply, d.base_uri, i.image_url
     FROM designs d LEFT JOIN design_names n ON n.category_name_id = d.category_name_id
+    LEFT JOIN design_images i ON i.category = d.category AND i.token_name = d.token_name
     WHERE d.category IN (${marks})`).all(...categories);
 
   const key = (c, t) => `${c}/${t}`;
@@ -155,6 +170,15 @@ function refreshMarket(db, { categories = DEFAULT_CATEGORIES, now = Date.now() }
     last.set(key(r.dg_category, r.dg_token), r);
   }
 
+  // Every stored sale per design, the yardstick for spotting gifts.
+  const history = new Map();
+  for (const r of db.prepare(`SELECT dg_category, dg_token, price FROM nft_sales
+    WHERE dg_category != '' AND price IS NOT NULL ORDER BY price`).all()) {
+    const k = key(r.dg_category, r.dg_token);
+    if (!history.has(k)) history.set(k, []);
+    history.get(k).push(r.price);
+  }
+
   const since30 = new Date(now - 30 * DAY).toISOString();
   const since7 = new Date(now - 7 * DAY).toISOString();
   const recent = new Map();
@@ -169,9 +193,9 @@ function refreshMarket(db, { categories = DEFAULT_CATEGORIES, now = Date.now() }
 
   const at = nowIso();
   const insert = db.prepare(`INSERT INTO market_designs (category, token_name, display_name, issued, max_supply, base_uri,
-      escrow, listed, last_price, last_sale_at, sales_7d, sales_30d, median_30d, low_30d, high_30d, refreshed_at)
+      escrow, listed, last_price, last_sale_at, sales_7d, sales_30d, median_30d, low_30d, high_30d, floor_30d, image_url, refreshed_at)
     VALUES (@category, @token_name, @display_name, @issued, @max_supply, @base_uri, @escrow, @listed, @last_price,
-      @last_sale_at, @sales_7d, @sales_30d, @median_30d, @low_30d, @high_30d, @refreshed_at)`);
+      @last_sale_at, @sales_7d, @sales_30d, @median_30d, @low_30d, @high_30d, @floor_30d, @image_url, @refreshed_at)`);
   db.transaction(() => {
     db.prepare("DELETE FROM market_designs").run();
     for (const d of designs) {
@@ -196,6 +220,8 @@ function refreshMarket(db, { categories = DEFAULT_CATEGORIES, now = Date.now() }
         median_30d: sorted.length ? round2(median(sorted)) : null,
         low_30d: sorted.length ? sorted[0] : null,
         high_30d: sorted.length ? sorted[sorted.length - 1] : null,
+        floor_30d: floorOf(sorted, history.get(k) || []),
+        image_url: d.image_url ?? null,
         refreshed_at: at,
       });
     }

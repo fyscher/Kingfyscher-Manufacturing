@@ -35,7 +35,7 @@ Backfills work a day at a time (all feeds, then decode that day) and checkpoint 
 | `t2` | table deltas of the live property listings | `property_listing_events` |
 | `t3` | table deltas of the live property offers | `property_offer_events` |
 
-NFT resale `price` is what the seller listed at (`p141 - p142`); the buyer pays that plus the 5% fee (`buyer_paid`). Raw rows are kept, so a better decoder only needs `decode`, never another download. About 3.5% of NFT resales are at exactly 1 UPX: gifts or moves between a player's own accounts, not market prices.
+NFT resale `price` is what the seller listed at (`p141 - p142`); the buyer pays that plus the 5% fee (`buyer_paid`). Raw rows are kept, so a better decoder only needs `decode`, never another download. About 3.5% of NFT resales are at exactly 1 UPX: creators' giveaways, gifts and moves between a player's own accounts, not market prices (of ~120k map-asset resales only 79 fell between 1 and 5 UPX; 83% of the 1-UPX ones came from a seller handing out that design 3+ times). The browser's "cheapest sold" (`market_designs.floor_30d`) leaves them out, and anything under a quarter of the design's median real sale.
 
 ## Floors (the Floor Board)
 - `listings` copies the whole on-chain listing book into `listings_current`. It's big (well over 400,000 rows on 2026-11-01), so it's a one-off or occasional job; the `tail` keeps it current afterwards by replaying the `t2` table changes it already collects (`applyListingDeltas`: writes upserted, removals deleted, removals first within a block).
