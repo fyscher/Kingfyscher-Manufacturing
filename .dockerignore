@@ -8,3 +8,10 @@ Requests
 *.db
 *.db-shm
 *.db-wal
+# Docker matches these at the context root only, so nested databases (the
+# indexer's data/indexer.db is ~830 MB) need their own patterns.
+data
+**/*.db
+**/*.db-shm
+**/*.db-wal
+**/*.log

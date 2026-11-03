@@ -1222,6 +1222,27 @@ function buildMaChart(candles) {
   maState.chartResizeObs = obs;
 }
 
+/* ── Map Assets: say how much history the chart really covers ── */
+function maCoverageText(cov) {
+  if (!cov) return '';
+  if (cov.complete) return `Covers the full ${cov.requestedDays} days requested.`;
+  const from  = new Date(cov.from);
+  const hours = Math.max(1, Math.round((Date.now() - from.getTime()) / 3_600_000));
+  const span  = hours < 48 ? `${hours} hours` : `${Math.round(hours / 24)} days`;
+  return `Only the last ~${span} of sales could be priced (since ${from.toISOString().slice(0, 16).replace('T', ' ')} UTC), not the ${cov.requestedDays} days requested.`;
+}
+
+function maShowCoverage(afterEl, cov) {
+  let el = $('ma-chart-coverage');
+  if (!el) {
+    el = document.createElement('div');
+    el.id = 'ma-chart-coverage';
+    el.style.cssText = 'font-size:12px;color:#94a3b8;margin-top:8px';
+    afterEl.after(el);
+  }
+  el.textContent = maCoverageText(cov);
+}
+
 /* ── Map Assets: Load chart for selected NFT ─────────────── */
 async function loadMaChart() {
   const name = $('ma-nft-name').value;
@@ -1235,6 +1256,7 @@ async function loadMaChart() {
   placeholder.style.display = 'flex';
   chartMsg.textContent      = 'Loading price history…';
   chartStats.classList.add('hidden');
+  maShowCoverage(chartStats, null);
 
   try {
     const data = await mapAssetsApi.getPriceHistory(name, days, 'day');
@@ -1246,9 +1268,10 @@ async function loadMaChart() {
       $('ma-stat-max').textContent    = maFmtUpx(data.max);
       $('ma-stat-trades').textContent = data.totalSales;
       chartStats.classList.remove('hidden');
+      maShowCoverage(chartStats, data.coverage);
     } else {
       placeholder.style.display = 'flex';
-      chartMsg.textContent      = `No priced sales found for "${name}" in recent on-chain history`;
+      chartMsg.textContent      = `No priced sales found for "${name}". ${maCoverageText(data.coverage)}`;
     }
   } catch {
     placeholder.style.display = 'flex';
@@ -1322,6 +1345,226 @@ document.querySelector('.nav-item[data-section="map-assets"]').addEventListener(
     loadMapAssets();
   }
 });
+
+/* ── Collection Optimizer ───────────────────────────────── */
+const fmtUpx = n => (n == null ? '—' : `${Math.round(n).toLocaleString()} UPX`);
+
+async function runCollectionOptimizer(e) {
+  e.preventDefault();
+  const btn = $('co-run-btn');
+  const errBox = $('co-error');
+  errBox.classList.add('hidden');
+  setLoading(btn, true);
+  try {
+    const params = new URLSearchParams({
+      yieldRate: String((Number($('co-yield').value) || 4.9) / 100),
+      rewardMonths: String(Number($('co-reward-months').value) || 0),
+    });
+    const r = await fetch(`/api/upland/optimizer/collections?${params}`, {
+      headers: { Authorization: `Bearer ${state.token}` },
+    });
+    if (r.status === 401) { logout(); return; }
+    const data = await r.json();
+    if (!r.ok) {
+      errBox.textContent = r.status === 403
+        ? 'Connect your Upland account on the Dashboard first, so the optimizer can read your properties.'
+        : (data.error || 'The optimizer failed');
+      errBox.classList.remove('hidden');
+      return;
+    }
+    renderCollectionPlan(data);
+  } catch {
+    errBox.textContent = 'Could not reach the optimizer';
+    errBox.classList.remove('hidden');
+  } finally {
+    setLoading(btn, false);
+  }
+}
+
+function renderCollectionPlan(data) {
+  const t = data.totals;
+  $('co-stat-props').textContent = t.properties.toLocaleString();
+  $('co-stat-now').textContent   = t.monthlyCurrent == null ? fmtUpx(t.monthlyBase) : fmtUpx(t.monthlyCurrent);
+  $('co-stat-plan').textContent  = fmtUpx(t.monthlyWithPlan);
+  const gain = t.gainVsCurrent == null ? t.monthlyGain : t.gainVsCurrent;
+  $('co-stat-gain').textContent  = `${gain >= 0 ? '+' : '−'}${fmtUpx(Math.abs(gain))}`;
+
+  const inactive = data.inactiveCurrent || [];
+  $('co-inactive-card').classList.toggle('hidden', inactive.length === 0);
+  $('co-inactive-count').textContent = inactive.length;
+  $('co-inactive-body').innerHTML = inactive.map(c => `
+    <tr>
+      <td>${escHtml(c.name)}</td>
+      <td style="text-align:right">×${c.boost}</td>
+      <td style="text-align:right">${c.have}</td>
+      <td style="text-align:right">${c.need}</td>
+    </tr>`).join('');
+
+  // Main list: collections that need edits in-game. A collection already tagged
+  // exactly as planned moves to "Already set up" instead.
+  const muted = t => `<span style="color:var(--text-muted)">${t}</span>`;
+  const where = p => `${escHtml(p.address)}, ${escHtml(p.city || '')}`;
+  const nameCell = c => `<strong>${escHtml(c.name)}</strong>${c.variant ? `<br><span style="color:var(--text-muted);font-size:0.8rem">${escHtml(c.variant)}</span>` : ''}${c.inferred ? ' <span class="badge" title="Our reading of the rule">inferred</span>' : ''}`;
+  const addTag = '<span style="color:var(--success);font-weight:600">+ add</span>';
+  const outTag = '<span style="color:var(--error);font-weight:600">− take out</span>';
+  const keep = data.plan.filter(c => c.status === 'keep');
+  const change = data.plan.filter(c => c.status !== 'keep');
+  const dropped = data.dropped || [];
+  const added = c => new Set((c.add || []).map(p => p.id));
+  const changeRows = change.map(c => `
+    <tr>
+      <td>${nameCell(c)}${c.status === 'new' ? `<br>${muted('<span style="font-size:0.8rem">new collection</span>')}` : ''}</td>
+      <td style="text-align:right">×${c.boost}</td>
+      <td style="font-size:0.85rem">${[
+        ...c.properties.map(p => added(c).has(p.id)
+          ? `${addTag} ${where(p)} ${muted(`(${Number(p.mintPrice).toLocaleString()} mint)`)}`
+          : muted(`already in: ${where(p)}`)),
+        ...(c.remove || []).map(p => `${outTag} ${where(p)}`),
+      ].join('<br>')}</td>
+      <td style="text-align:right">+${fmtUpx(c.monthlyGain)}</td>
+      <td style="text-align:right">${c.reward ? fmtUpx(c.reward) : '—'}</td>
+    </tr>`);
+  const droppedRows = dropped.map(d => `
+    <tr>
+      <td><strong>${escHtml(d.name)}</strong><br>${muted('<span style="font-size:0.8rem">active now, not in the plan</span>')}</td>
+      <td style="text-align:right">×${d.boost}</td>
+      <td style="font-size:0.85rem">${d.remove.map(p => `${outTag} ${where(p)}`).join('<br>')}</td>
+      <td style="text-align:right">—</td>
+      <td style="text-align:right">—</td>
+    </tr>`);
+  $('co-plan-count').textContent = change.length + dropped.length;
+  $('co-plan-body').innerHTML = changeRows.length + droppedRows.length
+    ? [...changeRows, ...droppedRows].join('')
+    : `<tr class="table-empty"><td colspan="5">${data.plan.length ? 'Nothing to change: every collection already matches the plan' : 'No collection can be completed with these properties'}</td></tr>`;
+
+  $('co-keep-count').textContent = keep.length;
+  $('co-keep-body').innerHTML = keep.length
+    ? keep.map(c => `
+        <tr>
+          <td>${nameCell(c)}</td>
+          <td style="text-align:right">×${c.boost}</td>
+          <td style="font-size:0.85rem">${c.properties.map(where).join('<br>')}</td>
+          <td style="text-align:right">+${fmtUpx(c.monthlyGain)}</td>
+        </tr>`).join('')
+    : '<tr class="table-empty"><td colspan="4">None of your collections match the plan exactly yet</td></tr>';
+
+  $('co-near-count').textContent = data.nearMisses.length;
+  $('co-near-body').innerHTML = data.nearMisses.length
+    ? data.nearMisses.map(n => `
+        <tr>
+          <td>${escHtml(n.name)}</td>
+          <td style="text-align:right">×${n.boost}</td>
+          <td style="font-size:0.85rem">${escHtml(n.requirements)}</td>
+          <td style="text-align:right">${n.have}</td>
+          <td style="text-align:right">${n.need}</td>
+        </tr>`).join('')
+    : '<tr class="table-empty"><td colspan="5">Nothing within two properties</td></tr>';
+
+  $('co-unsupported-count').textContent = data.unsupported.length;
+  $('co-unsupported-body').innerHTML = data.unsupported.length
+    ? data.unsupported.map(u => `
+        <tr>
+          <td>${escHtml(u.name)}</td>
+          <td style="text-align:right">×${u.boost}</td>
+          <td style="font-size:0.85rem">${escHtml(u.requirements)}</td>
+          <td style="font-size:0.8rem;color:var(--text-muted)">${escHtml(u.reason)}</td>
+        </tr>`).join('')
+    : '<tr class="table-empty"><td colspan="4">None in your cities</td></tr>';
+
+  const closedNote = (data.notOpenForCollections || []).length
+    ? `Not open to collections yet, so left out: ${data.notOpenForCollections.map(c => `${c.city} (${c.properties})`).join(', ')}. `
+    : '';
+  $('co-footnote').textContent = closedNote +
+    `${data.method === 'optimal' ? 'Provably optimal under these assumptions' : 'Best plan found (search limit reached)'}. ` +
+    `${data.coverage.readable} of ${data.coverage.collections} relevant collections understood. ` +
+    data.assumptions.join(' ');
+  $('co-results').classList.remove('hidden');
+}
+
+$('co-form').addEventListener('submit', runCollectionOptimizer);
+
+/* ── Floor Board ────────────────────────────────────────── */
+const fbState = { citiesLoaded: false };
+
+function fbSelectedCities() {
+  if ($('fb-all').checked) return [];
+  return [...document.querySelectorAll('#fb-city-list input:checked')].map(i => i.value);
+}
+
+async function loadFloorCities() {
+  const r = await fetch('/api/upland/floors/cities');
+  const data = await r.json();
+  if (!r.ok) throw new Error(data.error || 'Could not load cities');
+  $('fb-city-list').innerHTML = data.cities.map(c => `
+    <label style="display:flex;align-items:center;gap:0.4rem;cursor:pointer">
+      <input type="checkbox" value="${c.id}"> ${escHtml(c.name)}
+      <span style="color:var(--text-muted)">(${Number(c.listings).toLocaleString()})</span>
+    </label>`).join('');
+  document.querySelectorAll('#fb-city-list input').forEach(i => i.addEventListener('change', () => {
+    $('fb-all').checked = fbSelectedCities().length === 0 && !document.querySelector('#fb-city-list input:checked');
+    loadFloors();
+  }));
+  fbState.citiesLoaded = true;
+}
+
+async function loadFloors() {
+  const errBox = $('fb-error');
+  errBox.classList.add('hidden');
+  try {
+    if (!fbState.citiesLoaded) await loadFloorCities();
+    const cities = fbSelectedCities();
+    const r = await fetch(`/api/upland/floors?${new URLSearchParams({ top: '25', ...(cities.length ? { cities: cities.join(',') } : {}) })}`);
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.error || 'Could not load floors');
+    renderFloors(data, cities.length);
+  } catch (err) {
+    errBox.textContent = err.message;
+    errBox.classList.remove('hidden');
+  }
+}
+
+function renderFloors(data, pickedCount) {
+  const when = iso => (iso ? new Date(iso).toLocaleString() : 'never');
+  $('fb-meta').textContent =
+    `${pickedCount ? `${pickedCount} ${pickedCount === 1 ? 'city' : 'cities'} selected` : 'All of Upland'}. ` +
+    `Listing book: ${data.listings.toLocaleString()} live listings (snapshot ${when(data.snapshotAt)}; live changes applied up to ${when(data.changesAppliedTo)}). ` +
+    `${data.unmappedListings.toLocaleString()} listings aren't in the property catalog yet, so their city is unknown.`;
+
+  const mult = l => (l && l.markup ? `×${l.markup}` : '—');
+  $('fb-cheapest-count').textContent = data.cheapest.length;
+  $('fb-cheapest-body').innerHTML = data.cheapest.length
+    ? data.cheapest.map(l => `
+        <tr>
+          <td style="text-align:right"><strong>${fmtUpx(l.priceUpx)}</strong></td>
+          <td style="text-align:right">${mult(l)}</td>
+          <td>${escHtml(l.address || l.propertyId)}</td>
+          <td>${escHtml(l.neighborhood || '—')}</td>
+          <td>${escHtml(l.city || '—')}</td>
+          <td style="text-align:right">${l.mintPrice ? Number(l.mintPrice).toLocaleString() : '—'}</td>
+        </tr>`).join('')
+    : '<tr class="table-empty"><td colspan="6">No UPX listings in this selection</td></tr>';
+
+  $('fb-city-count').textContent = data.cities.length;
+  $('fb-city-body').innerHTML = data.cities.length
+    ? data.cities.map(c => `
+        <tr>
+          <td><strong>${escHtml(c.cityName)}</strong></td>
+          <td style="text-align:right" title="${escHtml(c.floor ? `${c.floor.address}, ${c.floor.neighborhood || ''}` : '')}">${c.floor ? fmtUpx(c.floor.priceUpx) : '—'}</td>
+          <td style="text-align:right">${fmtUpx(c.robustFloor)}</td>
+          <td style="text-align:right">${fmtUpx(c.medianAsk)}</td>
+          <td style="text-align:right">${c.upxListings.toLocaleString()}${c.usdListings ? ` <span style="color:var(--text-muted)">+${c.usdListings.toLocaleString()} USD</span>` : ''}</td>
+          <td style="text-align:right" title="${escHtml(c.lowestMarkup ? `${c.lowestMarkup.address}: ${fmtUpx(c.lowestMarkup.priceUpx)}` : '')}">${mult(c.lowestMarkup)}</td>
+          <td style="text-align:right">${c.usdFloor ? `$${Number(c.usdFloor.priceUsd).toLocaleString()}` : '—'}</td>
+        </tr>`).join('')
+    : '<tr class="table-empty"><td colspan="7">No catalogued cities in this selection</td></tr>';
+}
+
+$('fb-all').addEventListener('change', () => {
+  if ($('fb-all').checked) document.querySelectorAll('#fb-city-list input').forEach(i => { i.checked = false; });
+  loadFloors();
+});
+$('fb-refresh-btn').addEventListener('click', loadFloors);
+document.querySelector('.nav-item[data-section="floors"]').addEventListener('click', loadFloors);
 
 /* ── Init ────────────────────────────────────────────────── */
 if (new URLSearchParams(window.location.search).get('reset_token')) {

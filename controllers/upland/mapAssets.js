@@ -35,20 +35,26 @@ function parseMemo(memo) {
   };
 }
 
+// Hyperion timestamps are UTC but carry no zone ("2026-10-16T01:22:03.000"), and
+// Date.parse reads a zoneless date-time as local time. Pin them to UTC.
+function chainTimeMs(action) {
+  const ts = action["@timestamp"] || action.timestamp || "";
+  return Date.parse(/[zZ]|[+-]\d\d:?\d\d$/.test(ts) ? ts : `${ts}Z`);
+}
+
 // GET /api/upland/map-assets/activity?category=&limit=&type=
 mapAssetsRouter.get("/activity", async (req, res) => {
   const limit     = Math.min(Number(req.query.limit) || 50, 200);
   const catFilter  = req.query.category || null;
   const typeFilter = req.query.type || null;
 
-  let issueRes, transferRes, n44Res, n112Res;
+  let issueRes, transferRes, n112Res;
   try {
-    [issueRes, transferRes, n44Res, n112Res] = await Promise.all([
+    [issueRes, transferRes, n112Res] = await Promise.all([
       typeFilter === "sale" ? { actions: [] }
         : getActions({ filter: "uplandnftact:issue",       limit, sort: "desc" }),
       typeFilter === "mint" ? { actions: [] }
         : getActions({ filter: "uplandnftact:transfernft", limit, sort: "desc" }),
-      getActions({ filter: "playuplandme:n44",              limit, sort: "desc" }),
       typeFilter === "mint" ? { actions: [] }
         : getActions({ filter: "playuplandme:n112",        limit, sort: "desc" }),
     ]);
@@ -56,20 +62,13 @@ mapAssetsRouter.get("/activity", async (req, res) => {
     return res.status(502).json({ count: 0, events: [], error: err.message });
   }
 
-  // trxId → priceUpx: n112 = escrow resolve (p141 = buyer's total payment = sale price)
+  // trxId → priceUpx: n112 is the NFT resale and shares its transaction with the
+  // transfernft. (n44 is a UPX payout from communityupx, never a sale price.)
   const priceByTrx = {};
   for (const a of n112Res.actions || []) {
     const data  = a.act?.data || {};
     const price = parseFloat((data.p141 || "0 UPX").split(" ")[0]) || 0;
     if (price) priceByTrx[a.trx_id] = price;
-  }
-
-  // blockNum → priceUpx: n44 = native in-game buy-now
-  const priceByBlock = {};
-  for (const a of n44Res.actions || []) {
-    const data  = a.act?.data || {};
-    const price = parseFloat((data.p45 || "0 UPX").split(" ")[0]) || null;
-    if (price) priceByBlock[a.block_num] = price;
   }
 
   const events = [];
@@ -117,7 +116,7 @@ mapAssetsRouter.get("/activity", async (req, res) => {
       buyerEos:    data.to,
       uplandUser:  parsed.uplandUser,
       timestamp:   a["@timestamp"] || a.timestamp,
-      priceUpx:    priceByTrx[a.trx_id] || priceByBlock[a.block_num] || null,
+      priceUpx:    priceByTrx[a.trx_id] || null,
       ipfsCid:     parsed.ipfsCid,
       blockNum:    a.block_num,
       trxId:       a.trx_id,
@@ -175,13 +174,12 @@ mapAssetsRouter.get("/price-history", async (req, res) => {
 
   const cutoff = new Date(Date.now() - days * 86_400_000).toISOString();
 
-  // Fetch price lookup maps for the entire window upfront (parallel)
-  let n112Res, n44Res;
+  // Price lookup for the window. n112 is the NFT resale; n44 is a UPX payout
+  // from communityupx and must never be used as a sale price.
+  const N112_LIMIT = 200;
+  let n112Res;
   try {
-    [n112Res, n44Res] = await Promise.all([
-      getActions({ filter: "playuplandme:n112", limit: 200, sort: "desc", after: cutoff }),
-      getActions({ filter: "playuplandme:n44",  limit: 200, sort: "desc", after: cutoff }),
-    ]);
+    n112Res = await getActions({ filter: "playuplandme:n112", limit: N112_LIMIT, sort: "desc", after: cutoff });
   } catch (err) {
     return res.status(502).json({ error: err.message });
   }
@@ -192,32 +190,48 @@ mapAssetsRouter.get("/price-history", async (req, res) => {
     const p = parseFloat((d.p141 || "0 UPX").split(" ")[0]) || 0;
     if (p) priceByTrx[a.trx_id] = p;
   }
-  const priceByBlock = {};
-  for (const a of n44Res.actions || []) {
-    const d = a.act?.data || {};
-    const p = parseFloat((d.p45 || "0 UPX").split(" ")[0]) || null;
-    if (p) priceByBlock[a.block_num] = p;
-  }
 
   // Parallel-fetch up to MAX_PAGES of transfernft events in the window
   const MAX_PAGES = 10;
+  const PAGE_SIZE = 200;
   const pages = await Promise.allSettled(
     Array.from({ length: MAX_PAGES }, (_, page) =>
       getActions({
         filter: "uplandnftact:transfernft",
-        limit:  200,
+        limit:  PAGE_SIZE,
         sort:   "desc",
         after:  cutoff,
-        skip:   page * 200,
+        skip:   page * PAGE_SIZE,
       })
     )
   );
+
+  // Both lookups are newest-first and capped, so on a busy chain they reach back
+  // far less than `days`. Only the span both of them fully cover can be priced.
+  const cutoffMs = Date.parse(cutoff);
+  let coveredFromMs = cutoffMs;
+  const n112Actions = n112Res.actions || [];
+  if (n112Actions.length >= N112_LIMIT) {
+    coveredFromMs = Math.max(coveredFromMs, chainTimeMs(n112Actions[n112Actions.length - 1]));
+  }
+  const lastPage = pages[MAX_PAGES - 1];
+  const transfersCapped = pages.some(p => p.status !== "fulfilled")
+    || (lastPage.status === "fulfilled" && (lastPage.value.actions || []).length >= PAGE_SIZE);
+  if (transfersCapped) {
+    let oldestMs = Infinity;
+    for (const p of pages) {
+      if (p.status !== "fulfilled") continue;
+      for (const a of p.value.actions || []) oldestMs = Math.min(oldestMs, chainTimeMs(a));
+    }
+    if (oldestMs !== Infinity) coveredFromMs = Math.max(coveredFromMs, oldestMs);
+  }
 
   const sales = [];
   for (const result of pages) {
     if (result.status !== "fulfilled") continue;
     for (const a of result.value.actions || []) {
-      const ts   = a["@timestamp"] || a.timestamp || "";
+      const tsMs = chainTimeMs(a);
+      if (tsMs < coveredFromMs) continue;
       const data = a.act?.data || {};
       if (data.from !== "playuplandme") continue;
       const memo = data.memo || "";
@@ -226,25 +240,25 @@ mapAssetsRouter.get("/price-history", async (req, res) => {
       const nameM = memo.match(/NFT "([^"]+)"/);
       if (!nameM || nameM[1] !== name) continue;
 
-      const price = priceByTrx[a.trx_id] || priceByBlock[a.block_num] || null;
+      const price = priceByTrx[a.trx_id] || null;
       if (!price) continue;
 
-      sales.push({ ts, price });
+      sales.push({ tsMs, price });
     }
   }
 
-  // Build OHLC buckets (sales are newest-first from the API)
+  // Build OHLC buckets in UTC (sales are newest-first from the API)
   const buckets = new Map();
+  const utcDay = d => `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}-${String(d.getUTCDate()).padStart(2, "0")}`;
 
-  for (const { ts, price } of sales) {
-    const d = new Date(ts);
+  for (const { tsMs, price } of sales) {
+    const d = new Date(tsMs);
     let bucket;
     if (period === "week") {
-      const dow = d.getDay() || 7;
-      const mon = new Date(d.getTime() - (dow - 1) * 86_400_000);
-      bucket = `${mon.getFullYear()}-${String(mon.getMonth() + 1).padStart(2, "0")}-${String(mon.getDate()).padStart(2, "0")}`;
+      const dow = d.getUTCDay() || 7;
+      bucket = utcDay(new Date(tsMs - (dow - 1) * 86_400_000));
     } else {
-      bucket = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+      bucket = utcDay(d);
     }
     if (!buckets.has(bucket)) buckets.set(bucket, []);
     buckets.get(bucket).push(price);
@@ -274,6 +288,13 @@ mapAssetsRouter.get("/price-history", async (req, res) => {
     min: allPrices.length ? Math.min(...allPrices) : null,
     max: allPrices.length ? Math.max(...allPrices) : null,
     totalSales: allPrices.length,
+    // The span the numbers above actually cover; can be far shorter than `days`.
+    coverage: {
+      requestedDays: days,
+      from: new Date(coveredFromMs).toISOString(),
+      to: new Date().toISOString(),
+      complete: coveredFromMs === cutoffMs,
+    },
   };
 
   priceCache.set(cacheKey, { data: result, expiresAt: Date.now() + 5 * 60_000 });
