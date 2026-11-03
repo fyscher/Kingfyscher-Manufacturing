@@ -158,6 +158,18 @@
           </svg>
           Building Browser
         </a>
+        <a class="nav-item" data-section="collections">
+          <svg class="nav-icon" viewBox="0 0 20 20" fill="currentColor">
+            <path d="M5 3a2 2 0 00-2 2v2a2 2 0 002 2h2a2 2 0 002-2V5a2 2 0 00-2-2H5zM5 11a2 2 0 00-2 2v2a2 2 0 002 2h2a2 2 0 002-2v-2a2 2 0 00-2-2H5zM11 5a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V5zM14 11a1 1 0 011 1v1h1a1 1 0 110 2h-1v1a1 1 0 11-2 0v-1h-1a1 1 0 110-2h1v-1a1 1 0 011-1z"/>
+          </svg>
+          Collection Optimizer
+        </a>
+        <a class="nav-item" data-section="floors">
+          <svg class="nav-icon" viewBox="0 0 20 20" fill="currentColor">
+            <path fill-rule="evenodd" d="M3 3a1 1 0 000 2v8a2 2 0 002 2h2.586l-1.293 1.293a1 1 0 101.414 1.414L10 15.414l2.293 2.293a1 1 0 001.414-1.414L12.414 15H15a2 2 0 002-2V5a1 1 0 100-2H3zm11.707 4.707a1 1 0 00-1.414-1.414L10 9.586 8.707 8.293a1 1 0 00-1.414 0l-2 2a1 1 0 101.414 1.414L8 10.414l1.293 1.293a1 1 0 001.414 0l4-4z" clip-rule="evenodd"/>
+          </svg>
+          Floor Board
+        </a>
       </nav>
 
       <div class="sidebar-footer">
@@ -864,6 +876,178 @@
           <p style="font-size:0.875rem">Enter a building or street address to browse properties with pricing history</p>
         </div>
 
+      </section>
+
+      <!-- ── Collection Optimizer ─────────────────────────── -->
+      <section id="section-collections" class="section">
+        <div class="page-header">
+          <div>
+            <h2 class="page-title">Collection Optimizer</h2>
+            <p class="page-subtitle">Which collections to complete with the properties you own, for the most extra monthly UPX</p>
+          </div>
+        </div>
+
+        <div class="card" style="margin-bottom:1.25rem">
+          <div class="card-body">
+            <form id="co-form" class="inline-form">
+              <div class="field" style="min-width:160px">
+                <label for="co-yield">Yield rate (% per year)</label>
+                <input type="number" id="co-yield" value="4.9" min="0.1" max="100" step="0.01">
+              </div>
+              <div class="field" style="min-width:220px">
+                <label for="co-reward-months">Count one-time rewards over (months, 0 = ignore)</label>
+                <input type="number" id="co-reward-months" value="0" min="0" max="120" step="1">
+              </div>
+              <button type="submit" class="btn btn--primary" id="co-run-btn">
+                <span class="btn-text">Optimize my collections</span>
+                <span class="btn-spinner hidden"></span>
+              </button>
+            </form>
+            <div id="co-error" class="alert alert--error hidden" style="margin-top:0.75rem"></div>
+          </div>
+        </div>
+
+        <div id="co-results" class="hidden">
+          <div class="stats-grid" style="margin-bottom:1.25rem">
+            <div class="stat-card"><div class="stat-content"><span class="stat-label">Properties</span><span class="stat-value" id="co-stat-props">—</span></div></div>
+            <div class="stat-card"><div class="stat-content"><span class="stat-label">Earning now / month</span><span class="stat-value" id="co-stat-now">—</span></div></div>
+            <div class="stat-card"><div class="stat-content"><span class="stat-label">With this plan / month</span><span class="stat-value" id="co-stat-plan">—</span></div></div>
+            <div class="stat-card"><div class="stat-content"><span class="stat-label">Gain vs now / month</span><span class="stat-value" id="co-stat-gain">—</span></div></div>
+          </div>
+
+          <div class="card" style="margin-bottom:1.25rem">
+            <div class="card-header">
+              <h3 class="card-title">Changes to make: collections that need better addresses</h3>
+              <span class="badge" id="co-plan-count">0</span>
+            </div>
+            <div class="card-body card-body--flush" style="max-height:620px;overflow-y:auto">
+              <table class="table">
+                <thead>
+                  <tr>
+                    <th>Collection</th>
+                    <th style="text-align:right">Boost</th>
+                    <th>What to change</th>
+                    <th style="text-align:right">Gain / month</th>
+                    <th style="text-align:right">One-time reward</th>
+                  </tr>
+                </thead>
+                <tbody id="co-plan-body"></tbody>
+              </table>
+            </div>
+          </div>
+
+          <div class="card" style="margin-bottom:1.25rem">
+            <div class="card-header">
+              <h3 class="card-title">Already set up: matches the plan, no changes needed</h3>
+              <span class="badge" id="co-keep-count">0</span>
+            </div>
+            <div class="card-body card-body--flush" style="max-height:420px;overflow-y:auto">
+              <table class="table">
+                <thead>
+                  <tr>
+                    <th>Collection</th>
+                    <th style="text-align:right">Boost</th>
+                    <th>Properties in it</th>
+                    <th style="text-align:right">Gain / month</th>
+                  </tr>
+                </thead>
+                <tbody id="co-keep-body"></tbody>
+              </table>
+            </div>
+          </div>
+
+          <div class="card hidden" id="co-inactive-card" style="margin-bottom:1.25rem">
+            <div class="card-header">
+              <h3 class="card-title">Inactive right now: tagged but incomplete, so earning no boost</h3>
+              <span class="badge" id="co-inactive-count">0</span>
+            </div>
+            <div class="card-body card-body--flush" style="max-height:300px;overflow-y:auto">
+              <table class="table">
+                <thead><tr><th>Collection</th><th style="text-align:right">Boost</th><th style="text-align:right">You have</th><th style="text-align:right">Missing</th></tr></thead>
+                <tbody id="co-inactive-body"></tbody>
+              </table>
+            </div>
+          </div>
+
+          <div class="card" style="margin-bottom:1.25rem">
+            <div class="card-header">
+              <h3 class="card-title">Almost there: 1 or 2 properties short</h3>
+              <span class="badge" id="co-near-count">0</span>
+            </div>
+            <div class="card-body card-body--flush" style="max-height:360px;overflow-y:auto">
+              <table class="table">
+                <thead><tr><th>Collection</th><th style="text-align:right">Boost</th><th>Requirement</th><th style="text-align:right">You have</th><th style="text-align:right">Need</th></tr></thead>
+                <tbody id="co-near-body"></tbody>
+              </table>
+            </div>
+          </div>
+
+          <div class="card" style="margin-bottom:1.25rem">
+            <div class="card-header">
+              <h3 class="card-title">Check these by hand (curated lists we can't read)</h3>
+              <span class="badge" id="co-unsupported-count">0</span>
+            </div>
+            <div class="card-body card-body--flush" style="max-height:300px;overflow-y:auto">
+              <table class="table">
+                <thead><tr><th>Collection</th><th style="text-align:right">Boost</th><th>Requirement</th><th>Why</th></tr></thead>
+                <tbody id="co-unsupported-body"></tbody>
+              </table>
+            </div>
+          </div>
+
+          <p id="co-footnote" style="color:var(--text-muted);font-size:0.8rem"></p>
+        </div>
+      </section>
+
+      <!-- ── Floor Board ──────────────────────────────────── -->
+      <section id="section-floors" class="section">
+        <div class="page-header">
+          <div>
+            <h2 class="page-title">Floor Board</h2>
+            <p class="page-subtitle">Cheapest property listings across all of Upland, or just the cities you pick</p>
+          </div>
+          <button class="btn btn--ghost btn--sm" id="fb-refresh-btn">Refresh</button>
+        </div>
+
+        <div class="card" style="margin-bottom:1.25rem">
+          <div class="card-header">
+            <h3 class="card-title">Cities</h3>
+            <label style="display:flex;align-items:center;gap:0.4rem;font-size:0.85rem;cursor:pointer">
+              <input type="checkbox" id="fb-all" checked> All of Upland
+            </label>
+          </div>
+          <div class="card-body">
+            <div id="fb-city-list" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:0.35rem 1rem;max-height:220px;overflow-y:auto;font-size:0.85rem"></div>
+            <div id="fb-error" class="alert alert--error hidden" style="margin-top:0.75rem"></div>
+            <p id="fb-meta" style="color:var(--text-muted);font-size:0.8rem;margin-top:0.75rem"></p>
+          </div>
+        </div>
+
+        <div class="card" style="margin-bottom:1.25rem">
+          <div class="card-header">
+            <h3 class="card-title">Cheapest right now</h3>
+            <span class="badge" id="fb-cheapest-count">0</span>
+          </div>
+          <div class="card-body card-body--flush" style="max-height:480px;overflow-y:auto">
+            <table class="table">
+              <thead><tr><th style="text-align:right">Price</th><th style="text-align:right">× Mint</th><th>Address</th><th>Neighborhood</th><th>City</th><th style="text-align:right">Mint</th></tr></thead>
+              <tbody id="fb-cheapest-body"></tbody>
+            </table>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-header">
+            <h3 class="card-title">By city</h3>
+            <span class="badge" id="fb-city-count">0</span>
+          </div>
+          <div class="card-body card-body--flush" style="max-height:620px;overflow-y:auto">
+            <table class="table">
+              <thead><tr><th>City</th><th style="text-align:right">Floor</th><th style="text-align:right">3rd cheapest</th><th style="text-align:right">Median ask</th><th style="text-align:right">Listings</th><th style="text-align:right">Lowest × mint</th><th style="text-align:right">USD floor</th></tr></thead>
+              <tbody id="fb-city-body"></tbody>
+            </table>
+          </div>
+        </div>
       </section>
 
     </main>
