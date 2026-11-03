@@ -1222,6 +1222,27 @@ function buildMaChart(candles) {
   maState.chartResizeObs = obs;
 }
 
+/* ── Map Assets: say how much history the chart really covers ── */
+function maCoverageText(cov) {
+  if (!cov) return '';
+  if (cov.complete) return `Covers the full ${cov.requestedDays} days requested.`;
+  const from  = new Date(cov.from);
+  const hours = Math.max(1, Math.round((Date.now() - from.getTime()) / 3_600_000));
+  const span  = hours < 48 ? `${hours} hours` : `${Math.round(hours / 24)} days`;
+  return `Only the last ~${span} of sales could be priced (since ${from.toISOString().slice(0, 16).replace('T', ' ')} UTC), not the ${cov.requestedDays} days requested.`;
+}
+
+function maShowCoverage(afterEl, cov) {
+  let el = $('ma-chart-coverage');
+  if (!el) {
+    el = document.createElement('div');
+    el.id = 'ma-chart-coverage';
+    el.style.cssText = 'font-size:12px;color:#94a3b8;margin-top:8px';
+    afterEl.after(el);
+  }
+  el.textContent = maCoverageText(cov);
+}
+
 /* ── Map Assets: Load chart for selected NFT ─────────────── */
 async function loadMaChart() {
   const name = $('ma-nft-name').value;
@@ -1235,6 +1256,7 @@ async function loadMaChart() {
   placeholder.style.display = 'flex';
   chartMsg.textContent      = 'Loading price history…';
   chartStats.classList.add('hidden');
+  maShowCoverage(chartStats, null);
 
   try {
     const data = await mapAssetsApi.getPriceHistory(name, days, 'day');
@@ -1246,9 +1268,10 @@ async function loadMaChart() {
       $('ma-stat-max').textContent    = maFmtUpx(data.max);
       $('ma-stat-trades').textContent = data.totalSales;
       chartStats.classList.remove('hidden');
+      maShowCoverage(chartStats, data.coverage);
     } else {
       placeholder.style.display = 'flex';
-      chartMsg.textContent      = `No priced sales found for "${name}" in recent on-chain history`;
+      chartMsg.textContent      = `No priced sales found for "${name}". ${maCoverageText(data.coverage)}`;
     }
   } catch {
     placeholder.style.display = 'flex';
