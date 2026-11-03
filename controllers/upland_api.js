@@ -9,6 +9,7 @@ const structuresRouter = require("./upland/structures");
 const mapAssetsRouter  = require("./upland/mapAssets");
 const optimizerRouter  = require("./upland/optimizer");
 const floorsRouter     = require("./upland/floors");
+const marketRouter     = require("./upland/market");
 
 uplandRouter.use("/auth", authRouter);
 uplandRouter.use("/structures", structuresRouter);
@@ -20,5 +21,6 @@ uplandRouter.use("/appchain", appchainRouter);
 uplandRouter.use("/map-assets", mapAssetsRouter);
 uplandRouter.use("/optimizer", optimizerRouter);
 uplandRouter.use("/floors", floorsRouter);
+uplandRouter.use("/market", marketRouter);
 
 module.exports = uplandRouter;

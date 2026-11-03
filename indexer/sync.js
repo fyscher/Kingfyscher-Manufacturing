@@ -1,7 +1,8 @@
 const {
   toRawAction,
   toRawDelta,
-  isSaleTransfer,
+  isEscrowTransfer,
+  decodeEscrowEvents,
   decodeNftSales,
   decodePropertySalesUpx,
   decodePropertySalesUsd,
@@ -18,21 +19,26 @@ const {
   setCheckpoint,
 } = require("./db");
 const { applyListingDeltas } = require("./floors");
+const { applyEscrowEvents, topUpNfts, enrichSales, refreshMarket } = require("./nfts");
 
 const PAGE = 1000; // Hyperion's max limit
 const SKIP_CAP = 10_000; // Elasticsearch result window: skip + limit may not exceed this
 const MIN_WINDOW_MS = 60_000;
 const HOUR = 3_600_000;
+const MARKET_REFRESH_MS = 5 * 60_000; // the map asset browser's summary
 
 // What Stage 1 ingests. Window sizes keep a typical window well under one page
 // (volumes measured 2026-10-15). `keep` filters rows before they are stored.
 const FEEDS = {
   n112: { kind: "actions", params: { filter: "playuplandme:n112" }, windowMin: 360 },
-  sale_transfers: {
+  // Every NFT move into or out of escrow: resales (they name the item in
+  // nft_sales), listings, delists and store handouts (they keep the map asset
+  // browser's escrow current).
+  nft_transfers: {
     kind: "actions",
     params: { filter: "uplandnftact:transfernft" },
     windowMin: 30,
-    keep: a => isSaleTransfer(a.act?.data),
+    keep: a => isEscrowTransfer(a.act?.data),
   },
   n5: { kind: "actions", params: { filter: "playuplandme:n5" }, windowMin: 720 },
   n5_payouts: {
@@ -97,13 +103,17 @@ function advance(db, key, doneUntilMs) {
 /** Rebuild every decoded table for [from, to) from the raw rows already stored. */
 function decodeRange(db, from, to) {
   const t2 = rawDeltas(db, "t2", from, to);
-  return {
-    nft_sales: upsert(db, "nft_sales", decodeNftSales(rawActions(db, "n112", from, to), rawActions(db, "sale_transfers", from, to))),
+  const transfers = rawActions(db, "nft_transfers", from, to);
+  const decoded = {
+    nft_sales: upsert(db, "nft_sales", decodeNftSales(rawActions(db, "n112", from, to), transfers)),
+    nft_escrow_events: upsert(db, "nft_escrow_events", decodeEscrowEvents(transfers)),
     property_sales_upx: upsert(db, "property_sales", decodePropertySalesUpx(rawActions(db, "n5", from, to), rawActions(db, "n5_payouts", from, to))),
     property_sales_usd: upsert(db, "property_sales", decodePropertySalesUsd(rawActions(db, "n52", from, to), t2)),
     property_listing_events: upsert(db, "property_listing_events", decodeListingEvents(t2)),
     property_offer_events: upsert(db, "property_offer_events", decodeOfferEvents(rawDeltas(db, "t3", from, to))),
   };
+  enrichSales(db); // re-decoded sales lose their design tag; put it back
+  return decoded;
 }
 
 /**
@@ -164,23 +174,40 @@ async function tail({
   shouldStop = () => false,
   now = () => Date.now(),
 }) {
+  let lastRefresh = 0;
   while (!shouldStop()) {
     const cycleStart = now();
     let added = 0;
+    let escrowCovered = false;
     for (const name of feeds) {
       const done = getCheckpoint(db, tailKey(name));
-      // The listing book must see every change since it was last brought up to
-      // date, or it drifts: start from whichever of the two marks is earlier.
-      const listingsBase = name === "t2" ? getCheckpoint(db, "listings:applied") : null;
+      // The listing book and the NFT escrow must see every change since they
+      // were last brought up to date, or they drift: start from the earlier mark.
+      const listingsBase = name === "t2" ? getCheckpoint(db, "listings:applied")
+        : name === "nft_transfers" ? getCheckpoint(db, "nfts:applied") : null;
       const marks = [done, listingsBase].filter(Boolean).map(Date.parse);
       const fromMs = marks.length ? Math.min(...marks) : cycleStart - 10 * 60_000;
       added += await ingest(db, client, name, fromMs, cycleStart);
       advance(db, tailKey(name), cycleStart - lagMs);
+      if (name === "nft_transfers") {
+        // Escrow moves may only be applied when this fetch reached back to the
+        // escrow mark. Re-read it: a snapshot finishing mid-cycle moves it back,
+        // and applying then would step over moves nobody has fetched yet.
+        const mark = getCheckpoint(db, "nfts:applied");
+        escrowCovered = !!mark && fromMs <= Date.parse(mark);
+      }
       // Anything fetched from before the last-applied mark is replayed (in block order, so it's safe).
-      if (listingsBase && fromMs < Date.parse(listingsBase)) setCheckpoint(db, "listings:applied", iso(fromMs));
+      if (listingsBase && fromMs < Date.parse(listingsBase)) setCheckpoint(db, name === "t2" ? "listings:applied" : "nfts:applied", iso(fromMs));
     }
     decodeRange(db, iso(cycleStart - 30 * 60_000), iso(cycleStart + 60_000));
     applyListingDeltas(db); // keeps the live listing book (and so the floors) current
+    if (escrowCovered) applyEscrowEvents(db); // keeps which map assets are in escrow current
+    await topUpNfts({ db, client });
+    if (now() - lastRefresh >= MARKET_REFRESH_MS && getCheckpoint(db, "snapshot:nfts")) {
+      enrichSales(db);
+      refreshMarket(db, { now: now() });
+      lastRefresh = now();
+    }
     if (added > 0) log(`tail ${iso(cycleStart).slice(11, 19)}: +${added} raw rows, ${client.requestCount} requests total`);
     const wait = intervalMs - (now() - cycleStart);
     if (wait > 0 && !shouldStop()) await sleep(wait);

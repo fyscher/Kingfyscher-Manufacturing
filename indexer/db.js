@@ -72,6 +72,27 @@ CREATE INDEX IF NOT EXISTS properties_city ON properties (city_id);
 -- Listed properties the Developers API couldn't place, so lookups aren't repeated.
 CREATE TABLE IF NOT EXISTS properties_missing (id TEXT PRIMARY KEY, checked_at TEXT NOT NULL);
 
+-- NFTs of the tracked categories (snapshot of uplandnftact.dgood), kept
+-- current from escrow moves. in_escrow = held by playuplandme (listed, or held).
+CREATE TABLE IF NOT EXISTS nft_items (
+  id INTEGER PRIMARY KEY, category TEXT NOT NULL, token_name TEXT NOT NULL, serial INTEGER, in_escrow INTEGER NOT NULL
+);
+
+-- Every NFT move into or out of escrow: listing, delist, sale, or other.
+CREATE TABLE IF NOT EXISTS nft_escrow_events (
+  id TEXT PRIMARY KEY, global_sequence TEXT NOT NULL, ts TEXT NOT NULL, block_num INTEGER NOT NULL,
+  dgood_id INTEGER NOT NULL, direction TEXT NOT NULL, account TEXT, kind TEXT NOT NULL
+);
+
+-- One row per design for the map asset browser, rebuilt by refreshMarket.
+CREATE TABLE IF NOT EXISTS market_designs (
+  category TEXT NOT NULL, token_name TEXT NOT NULL, display_name TEXT, issued INTEGER, max_supply INTEGER, base_uri TEXT,
+  escrow INTEGER NOT NULL, listed INTEGER NOT NULL, last_price REAL, last_sale_at TEXT,
+  sales_7d INTEGER NOT NULL, sales_30d INTEGER NOT NULL, median_30d REAL, low_30d REAL, high_30d REAL,
+  refreshed_at TEXT NOT NULL,
+  PRIMARY KEY (category, token_name)
+);
+
 CREATE TABLE IF NOT EXISTS sync_state (
   feed TEXT PRIMARY KEY, done_until TEXT NOT NULL, updated_at TEXT NOT NULL
 );
@@ -80,12 +101,19 @@ CREATE TABLE IF NOT EXISTS sync_state (
 // Columns added after a table first shipped; created on older databases at open.
 const ADDED_COLUMNS = {
   listings_current: { address: "TEXT", city_id: "INTEGER", city_name: "TEXT", neighborhood_name: "TEXT", mint_price: "REAL" },
+  designs: { base_uri: "TEXT" },
+  // Which design a sale was, from nft_items (enrichSales); '' = not a tracked category.
+  nft_sales: { dg_category: "TEXT", dg_token: "TEXT" },
 };
 
 const INDEXES = `
 CREATE INDEX IF NOT EXISTS listings_city_upx ON listings_current (city_id, price_upx);
 CREATE INDEX IF NOT EXISTS listings_upx ON listings_current (price_upx);
 CREATE INDEX IF NOT EXISTS listings_city_usd ON listings_current (city_id, price_fiat);
+CREATE INDEX IF NOT EXISTS nft_items_escrow ON nft_items (category, token_name) WHERE in_escrow = 1;
+CREATE INDEX IF NOT EXISTS escrow_events_dgood ON nft_escrow_events (dgood_id, block_num);
+CREATE INDEX IF NOT EXISTS nft_sales_design ON nft_sales (dg_category, dg_token, ts);
+CREATE INDEX IF NOT EXISTS nft_sales_ts ON nft_sales (ts);
 `;
 
 function openDb(file) {
@@ -165,7 +193,7 @@ function setCheckpoint(db, feed, doneUntil) {
 
 function stats(db) {
   const tables = ["raw_actions", "raw_deltas", "nft_sales", "property_sales", "property_listing_events",
-    "property_offer_events", "designs", "design_names"];
+    "property_offer_events", "designs", "design_names", "nft_items", "nft_escrow_events", "market_designs"];
   const counts = Object.fromEntries(tables.map(t => [t, db.prepare(`SELECT COUNT(*) AS n FROM ${t}`).get().n]));
   const checkpoints = db.prepare("SELECT feed, done_until FROM sync_state ORDER BY feed").all();
   return { counts, checkpoints };

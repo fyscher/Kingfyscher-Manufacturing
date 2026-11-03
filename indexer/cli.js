@@ -9,6 +9,8 @@
 //   node indexer/cli.js properties [--cities 1,3]     # property catalog (needs DEVSHOPID, KFM_PASSWORD, UPLAND_URI)
 //   node indexer/cli.js properties --unmapped [N]     # look up listed properties the city paging missed
 //   node indexer/cli.js floors [--cities 1,3] [--top 10]
+//   node indexer/cli.js nfts [--categories outdoordecor,structornmt]   # snapshot NFTs + escrow (~9,800 requests, resumable)
+//   node indexer/cli.js market                        # rebuild the map asset browser's summary
 //   node indexer/cli.js stats
 
 const config = require("./config");
@@ -17,6 +19,7 @@ const { openDb, stats } = require("./db");
 const { FEEDS, backfill, tail, decodeRange } = require("./sync");
 const { syncDesigns } = require("./designs");
 const { snapshotListings, applyListingDeltas, syncProperties, lookupUnmapped, computeFloors } = require("./floors");
+const { DEFAULT_CATEGORIES, snapshotNfts, enrichSales, refreshMarket } = require("./nfts");
 
 function parseArgs(argv) {
   const [command, ...rest] = argv;
@@ -100,11 +103,24 @@ async function main() {
       console.log(JSON.stringify({ ...r, cities: r.cities.slice(0, 20) }, null, 2));
       break;
     }
+    case "nfts":
+      await snapshotNfts({
+        db,
+        client,
+        categories: opts.categories ? opts.categories.split(",") : DEFAULT_CATEGORIES,
+        log,
+        shouldStop: () => stopping,
+      });
+      break;
+    case "market":
+      // Escrow moves are applied by the tail only, which knows they've all been fetched.
+      log(`sales tagged: ${enrichSales(db)}, designs: ${refreshMarket(db)}`);
+      break;
     case "stats":
       console.log(JSON.stringify(stats(db), null, 2));
       break;
     default:
-      console.log("usage: node indexer/cli.js <backfill|tail|designs|decode|listings|properties|floors|stats> [--options]");
+      console.log("usage: node indexer/cli.js <backfill|tail|designs|decode|listings|properties|floors|nfts|market|stats> [--options]");
       process.exitCode = 1;
   }
   log(`done, ${client.requestCount} requests`);

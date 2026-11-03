@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Map Asset · Kingfyscher Manufacturing</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/css/main.css">
+  <link rel="stylesheet" href="/css/market.css">
+  <script src="https://unpkg.com/lightweight-charts@4.2.0/dist/lightweight-charts.standalone.production.js"></script>
+</head>
+<body>
+  <main class="market-page">
+    <div class="market-top">
+      <div>
+        <a class="market-back" href="/market.html">&larr; All map assets</a>
+        <h1 class="page-title" id="as-name" style="margin-top:0.35rem">Loading…</h1>
+        <p class="page-subtitle" id="as-sub"></p>
+      </div>
+      <span class="market-meta" id="as-fresh" style="margin:0"></span>
+    </div>
+
+    <div id="as-error" class="alert alert--error hidden" style="margin-bottom:1rem"></div>
+
+    <div id="as-content" class="hidden">
+      <div class="stats-grid" style="margin-bottom:1.25rem">
+        <div class="stat-card"><div class="stat-content"><span class="stat-label">For sale now</span><span class="stat-value" id="as-stat-listed">-</span></div></div>
+        <div class="stat-card"><div class="stat-content"><span class="stat-label">Last sale</span><span class="stat-value" id="as-stat-last">-</span></div></div>
+        <div class="stat-card"><div class="stat-content"><span class="stat-label">30-day median</span><span class="stat-value" id="as-stat-median">-</span></div></div>
+        <div class="stat-card"><div class="stat-content"><span class="stat-label">Sales in 30 days</span><span class="stat-value" id="as-stat-sales">-</span></div></div>
+      </div>
+
+      <div class="asset-grid">
+        <div>
+          <div class="card" style="margin-bottom:1.25rem">
+            <div class="card-header"><h3 class="card-title">Sale prices by day</h3><span class="badge" id="as-chart-days">0 days</span></div>
+            <div class="card-body">
+              <div id="as-chart"></div>
+              <p class="market-note" id="as-chart-note" style="margin-top:0.5rem"></p>
+            </div>
+          </div>
+
+          <div class="card" style="margin-bottom:1.25rem">
+            <div class="card-header"><h3 class="card-title">Recent sales</h3><span class="badge" id="as-sales-count">0</span></div>
+            <div class="card-body card-body--flush" style="max-height:520px;overflow-y:auto">
+              <table class="table market-table">
+                <thead><tr><th>When</th><th class="num">Seller got</th><th class="num">Buyer paid</th><th class="num">Serial</th></tr></thead>
+                <tbody id="as-sales-body"></tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+
+        <div>
+          <div class="card" style="margin-bottom:1.25rem">
+            <div class="card-header"><h3 class="card-title">Find them in Upland</h3></div>
+            <div class="card-body">
+              <p class="market-note" id="as-find"></p>
+              <div class="serial-chips" id="as-find-serials"></div>
+              <button class="btn btn--ghost btn--sm" id="as-copy" type="button" style="margin-top:0.85rem">Copy name</button>
+            </div>
+          </div>
+
+          <div class="card" style="margin-bottom:1.25rem">
+            <div class="card-header"><h3 class="card-title">For sale now</h3><span class="badge" id="as-listed-count">0</span></div>
+            <div class="card-body card-body--flush" style="max-height:520px;overflow-y:auto">
+              <table class="table market-table">
+                <thead><tr><th class="num">Serial</th><th>Listed</th><th>Seller account</th></tr></thead>
+                <tbody id="as-listed-body"></tbody>
+              </table>
+            </div>
+          </div>
+
+          <div class="card" style="margin-bottom:1.25rem">
+            <div class="card-header"><h3 class="card-title">Also held by Upland</h3><span class="badge" id="as-other-count">0</span></div>
+            <div class="card-body card-body--flush" style="max-height:320px;overflow-y:auto">
+              <table class="table market-table">
+                <thead><tr><th class="num">Serial</th><th>Why it's there</th></tr></thead>
+                <tbody id="as-other-body"></tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </main>
+  <script src="/js/market-common.js"></script>
+  <script src="/js/asset.js"></script>
+</body>
+</html>

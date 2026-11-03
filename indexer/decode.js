@@ -73,6 +73,39 @@ const isSaleTransfer = data =>
   data?.from === "playuplandme" && /is now the owner/.test(data.memo || "");
 
 /**
+ * NFT moves through Upland's escrow (verified 2026-11-03 on 1,000 transfers):
+ * listing = owner -> playuplandme, empty memo; delist = playuplandme -> owner,
+ * empty memo; resale = playuplandme -> buyer, "is now the owner" memo. Upland
+ * also hands out store stock from escrow ("is the initial owner", "owns the
+ * NFT"), so every move out of escrow counts, whatever the memo says.
+ */
+const isEscrowTransfer = data => data?.to === "playuplandme" || data?.from === "playuplandme";
+
+/** One row per NFT per escrow move: which way, who, and what kind of move. */
+function decodeEscrowEvents(transferRows) {
+  const rows = [];
+  for (const t of transferRows) {
+    const d = t.data;
+    if (!isEscrowTransfer(d)) continue;
+    const into = d.to === "playuplandme";
+    const kind = into ? (d.memo ? "other" : "listing") : !d.memo ? "delist" : isSaleTransfer(d) ? "sale" : "store";
+    for (const id of d.dgood_ids || []) {
+      rows.push({
+        id: `${t.global_sequence}:${id}`,
+        global_sequence: t.global_sequence,
+        ts: t.ts,
+        block_num: t.block_num,
+        dgood_id: Number(id),
+        direction: into ? "in" : "out",
+        account: into ? d.from : d.to,
+        kind,
+      });
+    }
+  }
+  return rows;
+}
+
+/**
  * NFT resales. `n112` carries buyer, seller and money; the transfernft in the
  * same transaction names the item. Price is what the seller listed at
  * (p141 - p142): the buyer pays that plus the 5% fee.
@@ -204,6 +237,8 @@ module.exports = {
   toRawDelta,
   parseSaleMemo,
   isSaleTransfer,
+  isEscrowTransfer,
+  decodeEscrowEvents,
   decodeNftSales,
   decodePropertySalesUpx,
   decodePropertySalesUsd,

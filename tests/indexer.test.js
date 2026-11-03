@@ -226,15 +226,15 @@ describe("indexer sync", () => {
   test("a backfill decodes sales, is safe to re-run, and keeps its own checkpoint", async () => {
     const db = openDb(":memory:");
     const client = fakeHyperion({ actions: [saleN112, saleTransfer, mintTransfer] });
-    const range = { from: "2026-10-15T22:00:00.000Z", to: "2026-10-16T00:00:00.000Z", feeds: ["n112", "sale_transfers"] };
+    const range = { from: "2026-10-15T22:00:00.000Z", to: "2026-10-16T00:00:00.000Z", feeds: ["n112", "nft_transfers"] };
 
     await backfill({ db, client, ...range });
     await backfill({ db, client, ...range });
 
     const sales = db.prepare("SELECT display_name, price FROM nft_sales").all();
     assert.deepStrictEqual(sales, [{ display_name: "Violets", price: 600 }]);
-    const stored = db.prepare("SELECT COUNT(*) AS n FROM raw_actions WHERE feed = 'sale_transfers'").get().n;
-    assert.strictEqual(stored, 1, "only the sale transfer is kept, not the mint");
+    const stored = db.prepare("SELECT COUNT(*) AS n FROM raw_actions WHERE feed = 'nft_transfers'").get().n;
+    assert.strictEqual(stored, 2, "both moves out of escrow are kept (the mint feeds the escrow tracker, not sales)");
     assert.strictEqual(getCheckpoint(db, "backfill:n112"), range.to);
     assert.strictEqual(getCheckpoint(db, "tail:n112"), null);
     db.close();

@@ -1,0 +1,109 @@
+/* Map asset browser and asset pages: full-window, no sidebar. Builds on main.css. */
+.market-page {
+  max-width: 1600px;
+  margin: 0 auto;
+  padding: 1.5rem 1.5rem 3rem;
+}
+
+.market-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 1rem;
+  flex-wrap: wrap;
+  margin-bottom: 1.25rem;
+}
+
+.market-back {
+  font-size: 0.8rem;
+  color: var(--text-secondary);
+  text-decoration: none;
+}
+.market-back:hover { color: var(--primary-lt); }
+
+.market-filters {
+  display: grid;
+  grid-template-columns: minmax(200px, 2fr) repeat(5, minmax(120px, 1fr)) auto;
+  gap: 0.75rem;
+  align-items: end;
+  margin-bottom: 0.75rem;
+}
+.market-filters .field input[type="number"] { -moz-appearance: textfield; }
+.market-check {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  font-size: 0.82rem;
+  color: var(--text-secondary);
+  height: 38px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.market-meta {
+  font-size: 0.78rem;
+  color: var(--text-muted);
+  margin-bottom: 1rem;
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+
+.market-table td, .market-table th { padding: 0.35rem 0.75rem; white-space: nowrap; }
+.market-table td:first-child { white-space: normal; }
+.market-table td.num, .market-table th.num { text-align: right; font-variant-numeric: tabular-nums; }
+.market-table th.sortable { cursor: pointer; user-select: none; }
+.market-table th.sortable:hover { color: var(--text-secondary); }
+.market-table th.sorted { color: var(--primary-lt); }
+.market-table thead th { position: sticky; top: 0; background: var(--bg-card); z-index: 1; }
+.market-table a { color: var(--text); text-decoration: none; font-weight: 500; }
+.market-table a:hover { color: var(--primary-lt); text-decoration: underline; }
+.market-table .muted { color: var(--text-muted); }
+.market-table .forsale { color: var(--success); font-weight: 600; }
+
+.market-pager {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 1rem;
+  padding: 0.75rem 1rem;
+  border-top: 1px solid var(--border);
+  font-size: 0.8rem;
+  color: var(--text-secondary);
+}
+
+.market-note {
+  font-size: 0.8rem;
+  color: var(--text-secondary);
+  line-height: 1.55;
+}
+.market-note strong { color: var(--text); }
+
+.asset-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 3fr) minmax(320px, 2fr);
+  gap: 1.25rem;
+  align-items: start;
+}
+
+.serial-chips { display: flex; flex-wrap: wrap; gap: 0.35rem; margin-top: 0.5rem; }
+.serial-chip {
+  font-family: 'SF Mono', 'Fira Code', ui-monospace, monospace;
+  font-size: 0.78rem;
+  padding: 0.15rem 0.5rem;
+  border-radius: 6px;
+  background: var(--success-glow);
+  color: var(--success);
+}
+
+#as-chart { min-height: 340px; }
+
+@media (max-width: 1100px) {
+  .market-filters { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .asset-grid { grid-template-columns: minmax(0, 1fr); }
+}
+@media (max-width: 600px) {
+  .market-page { padding: 1rem 1rem 2rem; }
+  .market-filters { grid-template-columns: minmax(0, 1fr); }
+}
