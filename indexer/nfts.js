@@ -9,17 +9,21 @@ const { nowIso, getCheckpoint, setCheckpoint, rawActions, upsert } = require("./
 const ESCROW = "playuplandme";
 const DAY = 86_400_000;
 
-// The Map Assets screen's categories (its "vehicle" is `landvehicle` on-chain).
-// Structures are left out: buildings aren't sold apart from their property.
-// Changing this needs a fresh `nfts` snapshot, since other categories aren't stored.
-const DEFAULT_CATEGORIES = ["outdoordecor", "structornmt", "seeds", "landvehicle", "uppie"];
+// The map asset browser's categories (the Map Assets screen's; its "vehicle" is
+// `landvehicle` on-chain).
+const MARKET_CATEGORIES = ["outdoordecor", "structornmt", "seeds", "landvehicle", "uppie"];
+// Stored in nft_items: those plus buildings, so the Building Browser knows what
+// each placed structure NFT is. Buildings aren't sold apart from their property,
+// so they stay out of the map asset browser. To add a category to an existing
+// database without a fresh snapshot: `nfts --add <category>`.
+const TRACKED_CATEGORIES = [...MARKET_CATEGORIES, "structure"];
 
 /**
  * Read the whole dgood table (~9.8M NFTs, 1,000 per request) and keep the
  * tracked categories. Resumable: the cursor is checkpointed after every page.
  * When the read finishes, escrow moves are replayed from when it began.
  */
-async function snapshotNfts({ db, client, categories = DEFAULT_CATEGORIES, log = () => {}, shouldStop = () => false }) {
+async function snapshotNfts({ db, client, categories = TRACKED_CATEGORIES, log = () => {}, shouldStop = () => false }) {
   const wanted = new Set(categories);
   let cursor = getCheckpoint(db, "snapshot:nfts:cursor");
   if (!cursor) {
@@ -87,13 +91,50 @@ function applyEscrowEvents(db) {
 }
 
 /**
- * NFTs minted after the snapshot read past their ids aren't in nft_items yet.
- * When an escrow move names one, read the table from the last id scanned.
+ * Add categories to nft_items without a fresh snapshot: read the whole dgood
+ * table again (~9,800 requests, resumable) and insert only rows of
+ * `categories`. Existing rows and the snapshot's marks are left alone.
  */
-async function topUpNfts({ db, client, categories = DEFAULT_CATEGORIES }) {
+async function addNftCategories({ db, client, categories, log = () => {}, shouldStop = () => false }) {
+  const wanted = new Set(categories);
+  const key = "scan:add-categories:cursor";
+  let cursor = getCheckpoint(db, key) || "0";
+  if (cursor !== "0") log(`nfts: resuming the added-category read at id ${cursor}`);
+  const insert = db.prepare("INSERT OR IGNORE INTO nft_items (id, category, token_name, serial, in_escrow) VALUES (?, ?, ?, ?, ?)");
+  let pages = 0;
+  let kept = 0;
+  for (;;) {
+    if (shouldStop()) {
+      log("nfts: stopped; rerun to resume");
+      return { done: false, kept };
+    }
+    const res = await client.getTableRows({ code: "uplandnftact", scope: "uplandnftact", table: "dgood", lower_bound: cursor, limit: 1000 });
+    const rows = res.rows || [];
+    db.transaction(() => {
+      for (const r of rows) {
+        if (wanted.has(r.category)) kept += insert.run(Number(r.id), r.category, r.token_name, r.serial_number ?? null, r.owner === ESCROW ? 1 : 0).changes;
+      }
+      if (res.more && res.next_key) setCheckpoint(db, key, String(res.next_key));
+    })();
+    if (++pages % 200 === 0) log(`nfts: through id ${rows.at(-1)?.id}, ${kept} added this run (${client.requestCount} requests)`);
+    if (!res.more || !res.next_key) break;
+    cursor = String(res.next_key);
+  }
+  db.prepare("DELETE FROM sync_state WHERE feed = ?").run(key);
+  log(`nfts: added ${kept} NFTs of ${categories.join(", ")}, ${client.requestCount} requests`);
+  return { done: true, kept };
+}
+
+/**
+ * NFTs minted after the snapshot read past their ids aren't in nft_items yet.
+ * When an escrow move or a newly placed building names one, read the table
+ * from the last id scanned.
+ */
+async function topUpNfts({ db, client, categories = TRACKED_CATEGORIES }) {
   const scanned = Number(getCheckpoint(db, "nfts:scanned_to"));
   if (!getCheckpoint(db, "snapshot:nfts") || !scanned) return 0;
-  const newer = db.prepare("SELECT 1 FROM nft_escrow_events WHERE dgood_id > ? LIMIT 1").get(scanned);
+  const newer = db.prepare(`SELECT 1 FROM nft_escrow_events WHERE dgood_id > @n
+    UNION ALL SELECT 1 FROM property_buildings WHERE nft_id > @n LIMIT 1`).get({ n: scanned });
   if (!newer) return 0;
   const wanted = new Set(categories);
   const insert = db.prepare("INSERT OR IGNORE INTO nft_items (id, category, token_name, serial, in_escrow) VALUES (?, ?, ?, ?, ?)");
@@ -126,6 +167,22 @@ function enrichSales(db) {
     WHERE dg_category IS NULL AND dgood_id IS NOT NULL`).run().changes;
 }
 
+/**
+ * Listing a property puts the NFTs placed on it into escrow with the same empty
+ * memo as an NFT listing, so they'd count as for sale though they can't be
+ * bought on their own. Measured 2026-11-03: 3,767 of 9,945 "listings" over two
+ * days were in the same block as their seller listing a property (491 of 2,858
+ * property listings; no seller listed two properties in one block). Those
+ * become kind 'bundle', with the property. Re-decoding rewrites the rows, so
+ * this runs after every decode. Returns rows tagged.
+ */
+function tagBundles(db, { from = "", to = "9999" } = {}) {
+  const sameBlock = `FROM property_listing_events l WHERE l.block_num = nft_escrow_events.block_num
+    AND l.seller = nft_escrow_events.account AND l.present = 1`;
+  return db.prepare(`UPDATE nft_escrow_events SET kind = 'bundle', property_id = (SELECT l.property_id ${sameBlock} LIMIT 1)
+    WHERE direction = 'in' AND kind = 'listing' AND ts >= ? AND ts < ? AND EXISTS (SELECT 1 ${sameBlock})`).run(from, to).changes;
+}
+
 const median = sorted => (sorted.length % 2 ? sorted[(sorted.length - 1) / 2] : (sorted[sorted.length / 2 - 1] + sorted[sorted.length / 2]) / 2);
 
 // 1 UPX is a giveaway price, not a market price: of ~120k map-asset resales
@@ -148,7 +205,7 @@ const round2 = n => Math.round(n * 100) / 100;
  * were put there as listings (their latest escrow move is a listing), and recent sale
  * prices. Prices are what sellers received (p141 - p142), never asks.
  */
-function refreshMarket(db, { categories = DEFAULT_CATEGORIES, now = Date.now() } = {}) {
+function refreshMarket(db, { categories = MARKET_CATEGORIES, now = Date.now() } = {}) {
   const marks = categories.map(() => "?").join(", ");
   const designs = db.prepare(`SELECT d.category, d.token_name, n.display_name, d.issued_supply, d.max_supply, d.base_uri, i.image_url
     FROM designs d LEFT JOIN design_names n ON n.category_name_id = d.category_name_id
@@ -230,4 +287,4 @@ function refreshMarket(db, { categories = DEFAULT_CATEGORIES, now = Date.now() }
   return designs.length;
 }
 
-module.exports = { DEFAULT_CATEGORIES, snapshotNfts, applyEscrowEvents, topUpNfts, enrichSales, refreshMarket };
+module.exports = { MARKET_CATEGORIES, TRACKED_CATEGORIES, snapshotNfts, addNftCategories, applyEscrowEvents, topUpNfts, enrichSales, tagBundles, refreshMarket };

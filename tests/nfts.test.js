@@ -3,7 +3,7 @@ const assert = require("node:assert");
 
 const { openDb, insertRawActions, setCheckpoint, getCheckpoint } = require("../indexer/db");
 const { toRawAction, decodeEscrowEvents, isEscrowTransfer } = require("../indexer/decode");
-const { snapshotNfts, applyEscrowEvents, topUpNfts, enrichSales, refreshMarket } = require("../indexer/nfts");
+const { snapshotNfts, applyEscrowEvents, topUpNfts, enrichSales, tagBundles, refreshMarket } = require("../indexer/nfts");
 const { tail } = require("../indexer/sync");
 
 const transfer = (seq, ts, block, from, to, ids, memo = "") => ({
@@ -134,6 +134,29 @@ describe("map asset summary", () => {
     );
     const lamp = db.prepare("SELECT low_30d, floor_30d FROM market_designs WHERE token_name = 'lamp'").get();
     assert.deepStrictEqual(lamp, { low_30d: 1, floor_30d: null }, "1-UPX giveaways alone give no price");
+  });
+
+  test("NFTs escrowed with their seller's property listing are bundles, not for sale (2026-11-03)", () => {
+    const db = openDb(":memory:");
+    db.prepare("INSERT INTO designs (category, token_name, category_name_id, max_supply, issued_supply, current_supply, updated_at) VALUES ('outdoordecor', 'bench', '55', 100, 40, 40, 'x')").run();
+    const item = db.prepare("INSERT INTO nft_items (id, category, token_name, serial, in_escrow) VALUES (?, 'outdoordecor', 'bench', ?, 1)");
+    [1, 2, 3].forEach(id => item.run(id, id));
+    const move = db.prepare("INSERT INTO nft_escrow_events (id, global_sequence, ts, block_num, dgood_id, direction, account, kind) VALUES (?, ?, ?, ?, ?, 'in', ?, 'listing')");
+    move.run("a", "1", "2026-11-02T10:00:00.000Z", 50, 1, "alice"); // alice lists a property in this block
+    move.run("b", "2", "2026-11-02T10:00:00.000Z", 50, 2, "bob"); // same block, but bob listed no property
+    move.run("c", "3", "2026-11-02T11:00:00.000Z", 60, 3, "alice"); // alice again, a later block with no property listing
+    const listing = db.prepare("INSERT INTO property_listing_events (id, ts, block_num, property_id, seller, price_upx, present) VALUES (?, ?, ?, ?, ?, ?, ?)");
+    listing.run("l1", "2026-11-02T10:00:00.000Z", 50, "777", "alice", 20000, 1);
+    listing.run("l2", "2026-11-02T11:00:00.000Z", 60, "888", "alice", 0, 0); // a row removed, not a listing
+
+    assert.strictEqual(tagBundles(db, { from: "2026-11-03" }), 0, "only the given span is looked at");
+    assert.strictEqual(tagBundles(db), 1);
+    assert.deepStrictEqual(
+      db.prepare("SELECT dgood_id, kind, property_id FROM nft_escrow_events ORDER BY dgood_id").all().map(r => [r.dgood_id, r.kind, r.property_id]),
+      [[1, "bundle", "777"], [2, "listing", null], [3, "listing", null]],
+    );
+    refreshMarket(db, { now: Date.parse("2026-11-03T00:00:00Z") });
+    assert.deepStrictEqual(db.prepare("SELECT escrow, listed FROM market_designs").get(), { escrow: 3, listed: 2 });
   });
 });
 

@@ -10,7 +10,12 @@
 //   node indexer/cli.js properties --unmapped [N]     # look up listed properties the city paging missed
 //   node indexer/cli.js floors [--cities 1,3] [--top 10]
 //   node indexer/cli.js nfts [--categories outdoordecor,structornmt]   # snapshot NFTs + escrow (~9,800 requests, resumable)
+//   node indexer/cli.js nfts --add structure          # add a category to an existing snapshot (~9,800 requests, resumable)
+//   node indexer/cli.js buildings                     # snapshot which building is on which property (~650 requests)
 //   node indexer/cli.js market                        # rebuild the map asset browser's summary
+//   node indexer/cli.js neighborhoods [--cities 1,3]  # boundaries + which border each other (needs DEVSHOPID, KFM_PASSWORD, UPLAND_URI)
+//   node indexer/cli.js contracts                     # read the price of every stored construction contract (one request each)
+//   node indexer/cli.js appraisal [--bundles]         # rebuild the appraiser's tables (--bundles: first fill sale bundles from stored history)
 //   node indexer/cli.js stats
 
 const config = require("./config");
@@ -19,7 +24,11 @@ const { openDb, stats } = require("./db");
 const { FEEDS, backfill, tail, decodeRange } = require("./sync");
 const { syncDesigns } = require("./designs");
 const { snapshotListings, applyListingDeltas, syncProperties, lookupUnmapped, computeFloors } = require("./floors");
-const { DEFAULT_CATEGORIES, snapshotNfts, enrichSales, refreshMarket } = require("./nfts");
+const { TRACKED_CATEGORIES, snapshotNfts, addNftCategories, enrichSales, tagBundles, refreshMarket } = require("./nfts");
+const { snapshotBuildings, snapshotConstructions, refreshBuildingTypes } = require("./buildings");
+const { syncNeighborhoods } = require("./neighborhoods");
+const { refreshAppraisal, fillSaleBundles } = require("./appraisal");
+const { fetchContractPayouts } = require("./contracts");
 
 function parseArgs(argv) {
   const [command, ...rest] = argv;
@@ -104,23 +113,49 @@ async function main() {
       break;
     }
     case "nfts":
-      await snapshotNfts({
-        db,
-        client,
-        categories: opts.categories ? opts.categories.split(",") : DEFAULT_CATEGORIES,
-        log,
-        shouldStop: () => stopping,
+      if (opts.add) await addNftCategories({ db, client, categories: String(opts.add).split(","), log, shouldStop: () => stopping });
+      else {
+        await snapshotNfts({
+          db,
+          client,
+          categories: opts.categories ? opts.categories.split(",") : TRACKED_CATEGORIES,
+          log,
+          shouldStop: () => stopping,
+        });
+      }
+      break;
+    case "buildings":
+      await snapshotBuildings({ db, client, log });
+      await snapshotConstructions({ db, client, log });
+      log(`building types: ${refreshBuildingTypes(db)} city/building rows`);
+      break;
+    case "neighborhoods": {
+      const { DEVSHOPID, KFM_PASSWORD, UPLAND_URI } = process.env;
+      if (!DEVSHOPID || !KFM_PASSWORD || !UPLAND_URI) throw new Error("neighborhoods needs DEVSHOPID, KFM_PASSWORD and UPLAND_URI (source the app's .env)");
+      const n = await syncNeighborhoods({
+        db, client, apiUrl: UPLAND_URI, basicAuth: Buffer.from(`${DEVSHOPID}:${KFM_PASSWORD}`).toString("base64"),
+        cityIds: opts.cities ? opts.cities.split(",").map(Number) : [], log, shouldStop: () => stopping,
       });
+      log(`neighborhoods: ${n} stored, ${db.prepare("SELECT COUNT(*) AS n FROM neighborhood_adjacency").get().n / 2} bordering pairs`);
+      break;
+    }
+    case "contracts":
+      log(`contracts: ${await fetchContractPayouts({ db, client, log, shouldStop: () => stopping })} prices read`);
+      break;
+    case "appraisal":
+      if (opts.bundles) fillSaleBundles(db, { log });
+      log(JSON.stringify(refreshAppraisal(db)));
       break;
     case "market":
       // Escrow moves are applied by the tail only, which knows they've all been fetched.
-      log(`sales tagged: ${enrichSales(db)}, designs: ${refreshMarket(db)}`);
+      log(`sales tagged: ${enrichSales(db)}, property bundles tagged: ${tagBundles(db)}, designs: ${refreshMarket(db)}` +
+        (db.prepare("SELECT 1 FROM sync_state WHERE feed = 'snapshot:buildings'").get() ? `, building types: ${refreshBuildingTypes(db)}` : ""));
       break;
     case "stats":
       console.log(JSON.stringify(stats(db), null, 2));
       break;
     default:
-      console.log("usage: node indexer/cli.js <backfill|tail|designs|decode|listings|properties|floors|nfts|market|stats> [--options]");
+      console.log("usage: node indexer/cli.js <backfill|tail|designs|decode|listings|properties|floors|nfts|buildings|market|neighborhoods|contracts|appraisal|stats> [--options]");
       process.exitCode = 1;
   }
   log(`done, ${client.requestCount} requests`);

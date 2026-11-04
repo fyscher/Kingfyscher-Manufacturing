@@ -3,6 +3,9 @@ const {
   toRawDelta,
   isEscrowTransfer,
   decodeEscrowEvents,
+  isBuildPayment,
+  decodeBuilds,
+  decodeSaleBundles,
   decodeNftSales,
   decodePropertySalesUpx,
   decodePropertySalesUsd,
@@ -19,13 +22,18 @@ const {
   setCheckpoint,
 } = require("./db");
 const { applyListingDeltas } = require("./floors");
-const { applyEscrowEvents, topUpNfts, enrichSales, refreshMarket } = require("./nfts");
+const { applyEscrowEvents, topUpNfts, enrichSales, tagBundles, refreshMarket } = require("./nfts");
+const { applyBuildingDeltas, applyConstructionDeltas, refreshBuildingTypes } = require("./buildings"); // refresh also fills in new buildings' type and city
+const { refreshAppraisal } = require("./appraisal");
+const { fetchContractPayouts } = require("./contracts");
 
 const PAGE = 1000; // Hyperion's max limit
 const SKIP_CAP = 10_000; // Elasticsearch result window: skip + limit may not exceed this
 const MIN_WINDOW_MS = 60_000;
 const HOUR = 3_600_000;
 const MARKET_REFRESH_MS = 5 * 60_000; // the map asset browser's summary
+const BUILDINGS_REFRESH_MS = 15 * 60_000; // the Building Browser's dropdown (one pass over ~650k buildings)
+const APPRAISAL_REFRESH_MS = 60 * 60_000; // the appraiser's sale facts, building values and back-test
 
 // What Stage 1 ingests. Window sizes keep a typical window well under one page
 // (volumes measured 2026-10-15). `keep` filters rows before they are stored.
@@ -47,8 +55,32 @@ const FEEDS = {
     windowMin: 720,
   },
   n52: { kind: "actions", params: { filter: "playuplandme:n52" }, windowMin: 720 },
-  t2: { kind: "deltas", params: { code: "playuplandme", scope: "playuplandme", table: "t2" }, windowMin: 360 },
-  t3: { kind: "deltas", params: { code: "playuplandme", scope: "playuplandme", table: "t3" }, windowMin: 720 },
+  // skipDense: a minute of table changes too dense to page is a bulk load, not
+  // activity (2025-04-28 09:19 UTC: 10,000+ t2 changes, zero sales), so it's
+  // recorded as a gap instead of stopping the run. Sales feeds never skip.
+  t2: { kind: "deltas", params: { code: "playuplandme", scope: "playuplandme", table: "t2" }, windowMin: 360, skipDense: true },
+  t3: { kind: "deltas", params: { code: "playuplandme", scope: "playuplandme", table: "t3" }, windowMin: 720, skipDense: true },
+  // When each building went up: SPARKLT payments to escrow, kept only for "BUILD," memos.
+  builds: {
+    kind: "actions",
+    params: { filter: "sparklettkac:transfer", "@transfer.to": "playuplandme" },
+    windowMin: 360,
+    keep: a => isBuildPayment(a.act?.data),
+  },
+  // Which building stands on which property (see buildings.js).
+  a21: { kind: "deltas", params: { code: "playuplandme", scope: "playuplandme", table: "a21" }, windowMin: 720, skipDense: true },
+  // Buildings under construction (see buildings.js): a row leaves when one is finished.
+  a23: { kind: "deltas", params: { code: "playuplandme", scope: "playuplandme", table: "a23" }, windowMin: 360, skipDense: true },
+  // Construction contracts taken (~55 a day); each one's price is read from its transaction (contracts.js).
+  contracts: { kind: "actions", params: { filter: "playuplandme:n151" }, windowMin: 1440 },
+};
+
+// Tables the tail keeps current by replaying a feed's changes, each from its own mark.
+const REPLAYS = {
+  t2: { mark: "listings:applied", apply: db => applyListingDeltas(db) }, // the Floor Board's listing book
+  nft_transfers: { mark: "nfts:applied", apply: db => applyEscrowEvents(db) }, // which map assets are in escrow
+  a21: { mark: "buildings:applied", apply: db => applyBuildingDeltas(db) }, // which building is on which property
+  a23: { mark: "constructions:applied", apply: db => applyConstructionDeltas(db) }, // which buildings are still being built
 };
 
 const iso = ms => new Date(ms).toISOString();
@@ -68,21 +100,33 @@ async function fetchWindow(client, feed, fromMs, toMs) {
   }
 }
 
-/** Like fetchWindow, but halves any window too dense for the skip cap. */
-async function fetchRange(client, feed, fromMs, toMs) {
+/**
+ * Like fetchWindow, but halves any window too dense for the skip cap. A window
+ * still too dense at a minute is skipped for skipDense feeds (onSkip is told)
+ * and an error for the rest.
+ */
+async function fetchRange(client, feed, fromMs, toMs, onSkip = () => {}) {
   try {
     return await fetchWindow(client, feed, fromMs, toMs);
   } catch (err) {
-    if (!(err instanceof DenseWindowError) || toMs - fromMs <= MIN_WINDOW_MS) throw err;
+    if (!(err instanceof DenseWindowError)) throw err;
+    if (toMs - fromMs <= MIN_WINDOW_MS) {
+      if (!feed.skipDense) throw err;
+      onSkip(fromMs, toMs);
+      return [];
+    }
     const mid = fromMs + Math.floor((toMs - fromMs) / 2);
-    return [...(await fetchRange(client, feed, fromMs, mid)), ...(await fetchRange(client, feed, mid, toMs))];
+    return [...(await fetchRange(client, feed, fromMs, mid, onSkip)), ...(await fetchRange(client, feed, mid, toMs, onSkip))];
   }
 }
 
 /** Fetch one feed's rows for a span and store them; returns rows added. */
 async function ingest(db, client, name, fromMs, toMs) {
   const feed = FEEDS[name];
-  const fetched = await fetchRange(client, feed, fromMs, toMs);
+  const fetched = await fetchRange(client, feed, fromMs, toMs, (gapFrom, gapTo) => {
+    setCheckpoint(db, `gap:${name}:${iso(gapFrom)}`, iso(gapTo));
+    console.warn(`${name}: skipped ${iso(gapFrom)} -> ${iso(gapTo)}, too dense to page (a bulk load)`);
+  });
   const kept = feed.keep ? fetched.filter(feed.keep) : fetched;
   return feed.kind === "actions"
     ? insertRawActions(db, kept.map(a => toRawAction(name, a)))
@@ -104,15 +148,20 @@ function advance(db, key, doneUntilMs) {
 function decodeRange(db, from, to) {
   const t2 = rawDeltas(db, "t2", from, to);
   const transfers = rawActions(db, "nft_transfers", from, to);
+  const upxSales = decodePropertySalesUpx(rawActions(db, "n5", from, to), rawActions(db, "n5_payouts", from, to));
+  const usdSales = decodePropertySalesUsd(rawActions(db, "n52", from, to), t2);
   const decoded = {
     nft_sales: upsert(db, "nft_sales", decodeNftSales(rawActions(db, "n112", from, to), transfers)),
     nft_escrow_events: upsert(db, "nft_escrow_events", decodeEscrowEvents(transfers)),
-    property_sales_upx: upsert(db, "property_sales", decodePropertySalesUpx(rawActions(db, "n5", from, to), rawActions(db, "n5_payouts", from, to))),
-    property_sales_usd: upsert(db, "property_sales", decodePropertySalesUsd(rawActions(db, "n52", from, to), t2)),
+    building_builds: upsert(db, "building_builds", decodeBuilds(rawActions(db, "builds", from, to))),
+    property_sales_upx: upsert(db, "property_sales", upxSales),
+    property_sales_usd: upsert(db, "property_sales", usdSales),
+    property_sale_nfts: upsert(db, "property_sale_nfts", decodeSaleBundles([...upxSales, ...usdSales], transfers)),
     property_listing_events: upsert(db, "property_listing_events", decodeListingEvents(t2)),
     property_offer_events: upsert(db, "property_offer_events", decodeOfferEvents(rawDeltas(db, "t3", from, to))),
   };
   enrichSales(db); // re-decoded sales lose their design tag; put it back
+  decoded.nft_bundles = tagBundles(db, { from, to }); // and escrow moves their property bundle
   return decoded;
 }
 
@@ -175,38 +224,51 @@ async function tail({
   now = () => Date.now(),
 }) {
   let lastRefresh = 0;
+  let lastBuildingsRefresh = 0;
+  // Not right away: a restart shouldn't hold the first cycles up for a full rebuild.
+  let lastAppraisalRefresh = now();
   while (!shouldStop()) {
     const cycleStart = now();
     let added = 0;
-    let escrowCovered = false;
+    const covered = [];
     for (const name of feeds) {
       const done = getCheckpoint(db, tailKey(name));
-      // The listing book and the NFT escrow must see every change since they
-      // were last brought up to date, or they drift: start from the earlier mark.
-      const listingsBase = name === "t2" ? getCheckpoint(db, "listings:applied")
-        : name === "nft_transfers" ? getCheckpoint(db, "nfts:applied") : null;
-      const marks = [done, listingsBase].filter(Boolean).map(Date.parse);
+      // A replayed table must see every change since it was last brought up to
+      // date, or it drifts: start from the earlier of the two marks.
+      const replay = REPLAYS[name];
+      const base = replay ? getCheckpoint(db, replay.mark) : null;
+      const marks = [done, base].filter(Boolean).map(Date.parse);
       const fromMs = marks.length ? Math.min(...marks) : cycleStart - 10 * 60_000;
       added += await ingest(db, client, name, fromMs, cycleStart);
       advance(db, tailKey(name), cycleStart - lagMs);
-      if (name === "nft_transfers") {
-        // Escrow moves may only be applied when this fetch reached back to the
-        // escrow mark. Re-read it: a snapshot finishing mid-cycle moves it back,
-        // and applying then would step over moves nobody has fetched yet.
-        const mark = getCheckpoint(db, "nfts:applied");
-        escrowCovered = !!mark && fromMs <= Date.parse(mark);
+      if (replay) {
+        // Apply only when this fetch reached back to the mark. Re-read it: a
+        // snapshot finishing mid-cycle moves it back, and applying then would
+        // step over changes nobody has fetched yet.
+        const mark = getCheckpoint(db, replay.mark);
+        if (mark && fromMs <= Date.parse(mark)) covered.push(replay);
+        // Anything fetched from before the mark is replayed (in block order, so it's safe).
+        if (base && fromMs < Date.parse(base)) setCheckpoint(db, replay.mark, iso(fromMs));
       }
-      // Anything fetched from before the last-applied mark is replayed (in block order, so it's safe).
-      if (listingsBase && fromMs < Date.parse(listingsBase)) setCheckpoint(db, name === "t2" ? "listings:applied" : "nfts:applied", iso(fromMs));
     }
     decodeRange(db, iso(cycleStart - 30 * 60_000), iso(cycleStart + 60_000));
-    applyListingDeltas(db); // keeps the live listing book (and so the floors) current
-    if (escrowCovered) applyEscrowEvents(db); // keeps which map assets are in escrow current
+    for (const replay of covered) replay.apply(db);
     await topUpNfts({ db, client });
+    // A few contract prices per cycle; a backlog is the `contracts` command's job.
+    if (feeds.includes("contracts")) await fetchContractPayouts({ db, client, limit: 10 });
     if (now() - lastRefresh >= MARKET_REFRESH_MS && getCheckpoint(db, "snapshot:nfts")) {
       enrichSales(db);
       refreshMarket(db, { now: now() });
       lastRefresh = now();
+    }
+    if (now() - lastBuildingsRefresh >= BUILDINGS_REFRESH_MS && getCheckpoint(db, "snapshot:buildings")) {
+      refreshBuildingTypes(db);
+      lastBuildingsRefresh = now();
+    }
+    if (now() - lastAppraisalRefresh >= APPRAISAL_REFRESH_MS && getCheckpoint(db, "snapshot:buildings")) {
+      const r = refreshAppraisal(db, { now: now() });
+      log(`appraisal: ${r.sales} sales, ${r.buildingTypes} building types`);
+      lastAppraisalRefresh = now();
     }
     if (added > 0) log(`tail ${iso(cycleStart).slice(11, 19)}: +${added} raw rows, ${client.requestCount} requests total`);
     const wait = intervalMs - (now() - cycleStart);
@@ -214,4 +276,4 @@ async function tail({
   }
 }
 
-module.exports = { FEEDS, fetchWindow, fetchRange, ingest, decodeRange, backfill, tail, DenseWindowError };
+module.exports = { FEEDS, REPLAYS, fetchWindow, fetchRange, ingest, decodeRange, backfill, tail, DenseWindowError };

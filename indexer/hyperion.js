@@ -73,6 +73,7 @@ function createClient({
     },
     getActions: params => request(`${historyUrl}/history/get_actions?${qs(params)}`),
     getDeltas: params => request(`${historyUrl}/history/get_deltas?${qs(params)}`),
+    getTransaction: id => request(`${historyUrl}/history/get_transaction?${qs({ id })}`),
     getTableRows: body =>
       request(`${rpcUrl}/v1/chain/get_table_rows`, {
         method: "POST",

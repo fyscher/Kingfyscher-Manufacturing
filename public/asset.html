@@ -9,7 +9,7 @@
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/css/main.css">
   <link rel="stylesheet" href="/css/market.css">
-  <script src="https://unpkg.com/lightweight-charts@4.2.0/dist/lightweight-charts.standalone.production.js"></script>
+  <script src="https://unpkg.com/lightweight-charts@4.2.0/dist/lightweight-charts.standalone.production.js" integrity="sha384-OK7vELvjHdhUFi31JYioPIcRHTROLdcDa6ZsNWgvgLaKj+9JqhU0Ad8g4wz3CXjA" crossorigin="anonymous"></script>
 </head>
 <body>
   <main class="market-page">
@@ -22,7 +22,10 @@
         <p class="page-subtitle" id="as-sub"></p>
         </div>
       </div>
-      <span class="market-meta" id="as-fresh" style="margin:0"></span>
+      <div style="display:flex;flex-direction:column;align-items:flex-end;gap:0.5rem">
+        <a class="btn btn--ghost btn--sm hidden" id="as-dashboard" href="/" style="text-decoration:none">Open in dashboard chart</a>
+        <span class="market-meta" id="as-fresh" style="margin:0"></span>
+      </div>
     </div>
 
     <div id="as-error" class="alert alert--error hidden" style="margin-bottom:1rem"></div>

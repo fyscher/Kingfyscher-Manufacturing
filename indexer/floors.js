@@ -170,10 +170,14 @@ function enrichListings(db, cityId = null) {
  * stays fast however big the listing book gets. Listings whose property isn't
  * in the catalog yet are counted as unmapped.
  */
-function computeFloors(db, { cityIds = [], top = 25, robustRank = 3 } = {}) {
-  const inCities = cityIds.length ? `AND city_id IN (${cityIds.map(() => "?").join(",")})` : "AND city_id IS NOT NULL";
+function computeFloors(db, { cityIds = [], excludeIds = [], top = 25, robustRank = 3 } = {}) {
+  // Only the picked cities; else everything but the excluded ones; else all of Upland.
+  const inCities = cityIds.length ? `AND city_id IN (${cityIds.map(() => "?").join(",")})`
+    : excludeIds.length ? `AND city_id IS NOT NULL AND city_id NOT IN (${excludeIds.map(() => "?").join(",")})`
+    : "AND city_id IS NOT NULL";
+  const cityArgs = cityIds.length ? cityIds : excludeIds;
   const counts = db.prepare(`SELECT city_id, city_name, SUM(price_upx > 0) AS upx, SUM(price_fiat > 0) AS usd
-    FROM listings_current WHERE 1 = 1 ${inCities} GROUP BY city_id`).all(...cityIds);
+    FROM listings_current WHERE 1 = 1 ${inCities} GROUP BY city_id`).all(...cityArgs);
   const nth = db.prepare(`SELECT * FROM listings_current WHERE city_id = ? AND price_upx > 0
     ORDER BY price_upx, property_id LIMIT 1 OFFSET ?`);
   const lowestMarkup = db.prepare(`SELECT * FROM listings_current WHERE city_id = ? AND price_upx > 0 AND mint_price > 0
@@ -203,7 +207,7 @@ function computeFloors(db, { cityIds = [], top = 25, robustRank = 3 } = {}) {
   }).sort((a, b) => (a.floor?.priceUpx ?? Infinity) - (b.floor?.priceUpx ?? Infinity));
 
   const cheapest = db.prepare(`SELECT * FROM listings_current WHERE price_upx > 0 ${inCities}
-    ORDER BY price_upx, property_id LIMIT ?`).all(...cityIds, top).map(listing);
+    ORDER BY price_upx, property_id LIMIT ?`).all(...cityArgs, top).map(listing);
   const totals = db.prepare("SELECT COUNT(*) AS listings, SUM(city_id IS NULL) AS unmapped FROM listings_current").get();
   return {
     snapshotAt: getCheckpoint(db, "snapshot:listings"),

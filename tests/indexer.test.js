@@ -223,6 +223,20 @@ describe("indexer sync", () => {
     assert.strictEqual(rows.length, 8); // four 30-minute leaves x 2 rows
   });
 
+  test("a minute of table changes too dense to page is skipped as a gap; sales feeds still fail", async () => {
+    // Every window is endlessly full, however small.
+    const flood = {
+      requestCount: 0,
+      getActions: async () => ({ actions: new Array(1000).fill({}) }),
+      getDeltas: async () => ({ deltas: new Array(1000).fill({}) }),
+    };
+    const from = Date.parse("2025-04-28T09:19:00Z");
+    const skipped = [];
+    const rows = await fetchRange(flood, FEEDS.t2, from, from + 60_000, (a, b) => skipped.push([a, b]));
+    assert.deepStrictEqual([rows.length, skipped.length], [0, 1]);
+    await assert.rejects(() => fetchRange(flood, FEEDS.n5, from, from + 60_000), /too dense/);
+  });
+
   test("a backfill decodes sales, is safe to re-run, and keeps its own checkpoint", async () => {
     const db = openDb(":memory:");
     const client = fakeHyperion({ actions: [saleN112, saleTransfer, mintTransfer] });

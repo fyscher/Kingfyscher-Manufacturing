@@ -645,6 +645,8 @@ body {
 }
 
 .card:hover { border-color: var(--border-hover); }
+/* A card holding a dropdown that must spill past its edge (search suggestions). */
+.card--overflow { overflow: visible; }
 
 .card-header {
   display: flex;

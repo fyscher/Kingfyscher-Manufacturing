@@ -131,26 +131,41 @@ marketRouter.get("/asset/:category/:token", (req, res) => {
   if (!design) return res.status(404).json({ error: "No such map asset design" });
 
   // Each NFT in escrow with its latest escrow move: a listing (and by whom,
-  // since when), some other move, or nothing on record (before our history).
+  // since when), placed on a property that went up for sale (a bundle), some
+  // other move, or nothing on record (before our history).
   const inEscrow = db.prepare(`
     WITH esc AS (SELECT id, serial FROM nft_items WHERE category = ? AND token_name = ? AND in_escrow = 1),
     ev AS (
-      SELECT e.dgood_id, e.ts, e.account, e.kind, e.direction,
+      SELECT e.dgood_id, e.ts, e.account, e.kind, e.direction, e.property_id,
         ROW_NUMBER() OVER (PARTITION BY e.dgood_id ORDER BY e.block_num DESC, e.global_sequence DESC) AS rn
       FROM nft_escrow_events e JOIN esc ON esc.id = e.dgood_id)
-    SELECT esc.id, esc.serial, ev.ts AS since, ev.account AS seller, ev.kind
+    SELECT esc.id, esc.serial, ev.ts AS since, ev.account AS seller, ev.kind, ev.property_id AS propertyId,
+      p.address, p.city_name AS city
     FROM esc LEFT JOIN ev ON ev.dgood_id = esc.id AND ev.rn = 1 AND ev.direction = 'in'
+    LEFT JOIN properties p ON p.id = ev.property_id
     ORDER BY ev.kind = 'listing' DESC, ev.ts DESC, esc.serial`).all(category, token);
 
   const sales = db.prepare(`SELECT ts, price, buyer_paid AS buyerPaid, mint AS serial FROM nft_sales
     WHERE dg_category = ? AND dg_token = ? AND price IS NOT NULL ORDER BY ts DESC`).all(category, token);
+  // 1 UPX is a giveaway price, never a market price (see indexer/nfts.js), so the
+  // chart and the stats leave those out; the sales list still shows them.
+  const real = sales.filter(s => s.price > 1);
+  const stats = Object.fromEntries([7, 30, 90].map(days => {
+    const since = new Date(Date.now() - days * 86_400_000).toISOString();
+    const xs = real.filter(s => s.ts >= since).map(s => s.price);
+    return [days, xs.length
+      ? { trades: xs.length, avg: Math.round((xs.reduce((a, b) => a + b, 0) / xs.length) * 100) / 100, min: Math.min(...xs), max: Math.max(...xs) }
+      : { trades: 0 }];
+  }));
 
   res.json({
     design: { ...design, categoryLabel: CATEGORY_LABELS[design.category] || design.category },
     listed: inEscrow.filter(i => i.kind === "listing"),
     otherEscrow: inEscrow.filter(i => i.kind !== "listing"),
     sales: sales.slice(0, 300),
-    candles: dailyCandles(sales),
+    candles: dailyCandles(real),
+    stats,
+    giveaways: sales.length - real.length,
     ...freshness(db),
   });
 });

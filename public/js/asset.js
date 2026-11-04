@@ -35,6 +35,9 @@ function render(d) {
   mk.$('as-name').textContent = name;
   mk.$('as-sub').textContent = `${a.categoryLabel} · ${a.issued == null ? '?' : a.issued.toLocaleString()} issued of ${a.max_supply == null ? '?' : a.max_supply.toLocaleString()} max · design id ${a.category}/${a.token_name}`;
   mk.$('as-fresh').textContent = mk.freshness(d);
+  // Send this asset to the dashboard's Price History chart.
+  mk.$('as-dashboard').href = `/?asset=${encodeURIComponent(a.category)}/${encodeURIComponent(a.token_name)}`;
+  mk.$('as-dashboard').classList.remove('hidden');
 
   if (a.image_url) {
     const art = mk.$('as-art');
@@ -80,8 +83,10 @@ function render(d) {
     ? d.otherEscrow.map(i => `
       <tr>
         <td class="num">#${mk.esc(i.serial)}</td>
-        <td class="muted" style="font-size:0.78rem">${i.kind === 'other'
-          ? `Moved in ${mk.ago(i.since)} by <span class="mono">${mk.esc(i.seller)}</span>, not as a listing (for example, placed on a property that's for sale)`
+        <td class="muted" style="font-size:0.78rem">${i.kind === 'bundle'
+          ? `Placed on ${i.address ? `${mk.esc(i.address)}${i.city ? `, ${mk.esc(i.city)}` : ''}` : `property ${mk.esc(i.propertyId)}`}, which went up for sale ${mk.ago(i.since)}: it comes with the property, not on its own`
+          : i.kind === 'other'
+          ? `Moved in ${mk.ago(i.since)} by <span class="mono">${mk.esc(i.seller)}</span>, not as a listing`
           : `In escrow since before ${mk.esc(historyStart)}: an older listing, or held by Upland`}</td>
       </tr>`).join('')
     : '<tr class="table-empty"><td colspan="2">Nothing else in escrow</td></tr>';
@@ -99,7 +104,7 @@ function render(d) {
 
   mk.$('as-chart-days').textContent = `${d.candles.length} days`;
   mk.$('as-chart-note').textContent = d.salesFrom
-    ? `Daily open, high, low and close of what sellers received, with the number of sales underneath. History starts ${mk.day(d.salesFrom)}.`
+    ? `Daily open, high, low and close of what sellers received, with the number of sales underneath (1 UPX giveaways left out). History starts ${mk.day(d.salesFrom)}.`
     : '';
   mk.$('as-content').classList.remove('hidden');
   drawChart(d.candles);
