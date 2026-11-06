@@ -13,7 +13,7 @@ const {
 } = require("../indexer/decode");
 const { createClient } = require("../indexer/hyperion");
 const { openDb, getCheckpoint } = require("../indexer/db");
-const { FEEDS, fetchRange, backfill, tail } = require("../indexer/sync");
+const { FEEDS, fetchRange, backfill, tail, BLOCKED_BACKOFF_MS } = require("../indexer/sync");
 const { setCheckpoint } = require("../indexer/db");
 
 // Fixtures follow the real payload shapes recorded 2026-10-15, with every
@@ -291,3 +291,48 @@ describe("indexer tail recovery", () => {
   });
 });
 
+
+describe("indexer tail outages", () => {
+  test("a 403 makes the tail wait 15 minutes and try again instead of exiting (2026-11-05)", async () => {
+    const db = openDb(":memory:");
+    let calls = 0;
+    const client = {
+      requestCount: 0,
+      getActions: async () => {
+        if (calls++ === 0) throw Object.assign(new Error("Upland chain API 403: <!DOCTYPE html> Attention Required!"), { status: 403 });
+        return { actions: [] };
+      },
+    };
+    let t = Date.parse("2026-11-05T01:31:00.000Z");
+    let slept = 0;
+    const logs = [];
+    await tail({
+      db, client, feeds: ["n5"], intervalMs: 15_000, lagMs: 60_000, log: m => logs.push(m),
+      now: () => t, sleep: async ms => { slept += ms; t += ms; },
+      shouldStop: () => logs.some(l => l.includes("answering again")),
+    });
+    assert.ok(slept >= BLOCKED_BACKOFF_MS, "waited out the back-off");
+    assert.match(logs[0], /refused the indexer \(HTTP 403\); trying again in 15 minutes/);
+    assert.match(logs[1], /answering again after 15 minutes/);
+  });
+
+  test("other errors still stop the tail, for systemd to restart", async () => {
+    const db = openDb(":memory:");
+    const client = { requestCount: 0, getActions: async () => { throw Object.assign(new Error("Upland chain API 400: bad request"), { status: 400 }); } };
+    await assert.rejects(() => tail({ db, client, feeds: ["n5"], intervalMs: 0, lagMs: 0, sleep: async () => {}, shouldStop: () => false }), /400/);
+  });
+
+  test("after a gap, everything fetched since the last decode is decoded, not just the last 30 minutes", async () => {
+    const db = openDb(":memory:");
+    setCheckpoint(db, "tail:decoded", "2026-11-05T01:00:00.000Z");
+    setCheckpoint(db, "tail:n5", "2026-11-05T01:30:00.000Z");
+    const midOutage = action(5001, "trxgap1", 500, "2026-11-05T12:00:00.000", "playuplandme", "n5",
+      { p14: "buyer1111111", a45: "777", p24: "15000.00 UPX", memo: "This transaction notarizes that Upland user x with EOS account buyer1111111 owns 1 TEST ST on Upland." });
+    const client = { requestCount: 0, getActions: async p => ({ actions: p.filter === "playuplandme:n5" ? [midOutage] : [] }) };
+    let cycles = 0;
+    await tail({ db, client, feeds: ["n5"], intervalMs: 0, lagMs: 60_000, now: () => Date.parse("2026-11-06T02:30:00.000Z"),
+      sleep: async () => {}, shouldStop: () => cycles++ > 0 });
+    assert.deepStrictEqual(db.prepare("SELECT property_id, price FROM property_sales").all(), [{ property_id: "777", price: 15000 }]);
+    assert.strictEqual(getCheckpoint(db, "tail:decoded"), "2026-11-06T02:00:00.000Z", "the next cycle starts 30 minutes back");
+  });
+});

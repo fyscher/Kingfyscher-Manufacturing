@@ -207,10 +207,19 @@ async function backfill({
   }
 }
 
+// When Upland refuses the indexer (403: Cloudflare blocked it, e.g. during
+// Upland's maintenance on 2026-11-05; 429: rate-limited past the client's own
+// retries), wait this long and try again instead of exiting: the process used
+// to exit and systemd restarted it every 30 s, 169 times in one outage.
+const BLOCKED_STATUSES = new Set([403, 429]);
+const BLOCKED_BACKOFF_MS = 15 * 60_000;
+const DECODE_OVERLAP_MS = 30 * 60_000;
+
 /**
  * Follow the chain live. Each cycle re-reads from `lagMs` behind the last
- * checkpoint (rows dedupe on their keys), then re-decodes the last 30 minutes
- * so joins that straddled a cycle get completed.
+ * checkpoint (rows dedupe on their keys), then decodes everything fetched since
+ * the last decode (after an outage, the whole gap, a day at a time), starting
+ * 30 minutes early so joins that straddled a cycle get completed.
  */
 async function tail({
   db,
@@ -227,8 +236,13 @@ async function tail({
   let lastBuildingsRefresh = 0;
   // Not right away: a restart shouldn't hold the first cycles up for a full rebuild.
   let lastAppraisalRefresh = now();
-  while (!shouldStop()) {
-    const cycleStart = now();
+  let blockedSince = null;
+  // A long wait in short steps, so a stop request isn't held up for minutes.
+  const pause = async ms => {
+    for (let left = ms; left > 0 && !shouldStop(); left -= 5_000) await sleep(Math.min(5_000, left));
+  };
+
+  async function cycle(cycleStart) {
     let added = 0;
     const covered = [];
     for (const name of feeds) {
@@ -251,8 +265,17 @@ async function tail({
         if (base && fromMs < Date.parse(base)) setCheckpoint(db, replay.mark, iso(fromMs));
       }
     }
-    decodeRange(db, iso(cycleStart - 30 * 60_000), iso(cycleStart + 60_000));
+    // Decode from the last decode, not just the last 30 minutes: after the
+    // 2026-11-05 outage the tail fetched ~24 hours of sales, listings and builds
+    // but only ever decoded the newest half hour of them.
+    const decodedTo = getCheckpoint(db, "tail:decoded");
+    const decodeFrom = Math.min(cycleStart - DECODE_OVERLAP_MS, decodedTo ? Date.parse(decodedTo) : Infinity);
+    const decodeTo = cycleStart + 60_000;
+    for (let from = decodeFrom; from < decodeTo; from += 24 * HOUR) decodeRange(db, iso(from), iso(Math.min(from + 24 * HOUR, decodeTo)));
     for (const replay of covered) replay.apply(db);
+    // Replaying escrow moves rewrites them without their property-bundle tag; put it back.
+    tagBundles(db, { from: iso(decodeFrom) });
+    setCheckpoint(db, "tail:decoded", iso(cycleStart - DECODE_OVERLAP_MS));
     await topUpNfts({ db, client });
     // A few contract prices per cycle; a backlog is the `contracts` command's job.
     if (feeds.includes("contracts")) await fetchContractPayouts({ db, client, limit: 10 });
@@ -270,10 +293,29 @@ async function tail({
       log(`appraisal: ${r.sales} sales, ${r.buildingTypes} building types`);
       lastAppraisalRefresh = now();
     }
+    return added;
+  }
+
+  while (!shouldStop()) {
+    const cycleStart = now();
+    let added;
+    try {
+      added = await cycle(cycleStart);
+    } catch (err) {
+      if (!BLOCKED_STATUSES.has(err.status)) throw err;
+      if (blockedSince == null) blockedSince = cycleStart;
+      log(`Upland refused the indexer (HTTP ${err.status}); trying again in ${BLOCKED_BACKOFF_MS / 60_000} minutes`);
+      await pause(BLOCKED_BACKOFF_MS);
+      continue;
+    }
+    if (blockedSince != null) {
+      log(`Upland is answering again after ${Math.round((cycleStart - blockedSince) / 60_000)} minutes; the gap is fetched and decoded`);
+      blockedSince = null;
+    }
     if (added > 0) log(`tail ${iso(cycleStart).slice(11, 19)}: +${added} raw rows, ${client.requestCount} requests total`);
     const wait = intervalMs - (now() - cycleStart);
     if (wait > 0 && !shouldStop()) await sleep(wait);
   }
 }
 
-module.exports = { FEEDS, REPLAYS, fetchWindow, fetchRange, ingest, decodeRange, backfill, tail, DenseWindowError };
+module.exports = { FEEDS, REPLAYS, fetchWindow, fetchRange, ingest, decodeRange, backfill, tail, DenseWindowError, BLOCKED_BACKOFF_MS };
