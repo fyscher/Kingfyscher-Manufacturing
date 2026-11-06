@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Map Asset Browser · Kingfyscher Manufacturing</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/css/main.css">
+  <link rel="stylesheet" href="/css/market.css">
+</head>
+<body>
+  <main class="market-page">
+    <div class="market-top">
+      <div>
+        <a class="market-back" href="/">&larr; Back to the app</a>
+        <h1 class="page-title" style="margin-top:0.35rem">Map Asset Browser</h1>
+        <p class="page-subtitle">Every decoration, ornament, seed, vehicle and Uppie design. Click one to see the serials up for sale.</p>
+      </div>
+      <div class="view-toggle" role="group" aria-label="View">
+        <button type="button" class="btn btn--ghost btn--sm" data-view="cards">Cards</button>
+        <button type="button" class="btn btn--ghost btn--sm" data-view="list">List</button>
+      </div>
+    </div>
+
+    <div id="mk-error" class="alert alert--error hidden" style="margin-bottom:1rem"></div>
+
+    <form id="mk-filters" class="market-filters" autocomplete="off">
+      <div class="field">
+        <label for="mk-q">Search by name</label>
+        <input id="mk-q" type="search" placeholder="e.g. lamp, bench, rose">
+      </div>
+      <div class="field">
+        <label for="mk-category">Category</label>
+        <select id="mk-category"><option value="">All categories</option></select>
+      </div>
+      <div class="field">
+        <label for="mk-min">Price from (UPX)</label>
+        <input id="mk-min" type="number" min="0" step="any" placeholder="any">
+      </div>
+      <div class="field">
+        <label for="mk-max">Price to (UPX)</label>
+        <input id="mk-max" type="number" min="0" step="any" placeholder="any">
+      </div>
+      <div class="field">
+        <label for="mk-sort">Sort by</label>
+        <select id="mk-sort">
+          <option value="listed">Most for sale</option>
+          <option value="cheapest">Cheapest sold</option>
+          <option value="priciest">Priciest sold</option>
+          <option value="traded">Most traded (30 days)</option>
+          <option value="recent">Sold most recently</option>
+          <option value="rarest">Rarest (fewest issued)</option>
+          <option value="name">Name</option>
+        </select>
+      </div>
+      <div class="field">
+        <label for="mk-size" id="mk-size-label">Per page</label>
+        <select id="mk-size">
+          <option value="100">100</option>
+          <option value="250">250</option>
+          <option value="500">500</option>
+        </select>
+      </div>
+      <label class="market-check"><input id="mk-listed" type="checkbox"> For sale now only</label>
+    </form>
+
+    <div class="market-meta">
+      <span id="mk-count"></span>
+      <span id="mk-fresh"></span>
+    </div>
+
+    <div id="mk-cards" class="asset-cards"></div>
+    <div id="mk-sentinel" class="market-note" style="text-align:center;padding:1.25rem 0"></div>
+
+    <div class="card" id="mk-list">
+      <div class="card-body card-body--flush" style="overflow-x:auto">
+        <table class="table market-table">
+          <thead>
+            <tr>
+              <th class="sortable" data-sort="name">Name</th>
+              <th>Category</th>
+              <th class="num sortable" data-sort="listed" title="Serials whose latest escrow move was a listing">For sale</th>
+              <th class="num" title="Everything Upland is holding: listings, plus items held for other reasons">In escrow</th>
+              <th class="num sortable" data-sort="recent">Last sale</th>
+              <th class="num sortable" data-sort="cheapest" title="Cheapest sale in 30 days, leaving out gift sales (or the last sale when there were none)">Cheapest sold</th>
+              <th class="num">30-day median</th>
+              <th class="num">30-day low-high</th>
+              <th class="num sortable" data-sort="traded">Sales 7d / 30d</th>
+              <th class="num sortable" data-sort="rarest">Issued / max</th>
+            </tr>
+          </thead>
+          <tbody id="mk-body"><tr class="table-empty"><td colspan="10">Loading…</td></tr></tbody>
+        </table>
+      </div>
+      <div class="market-pager">
+        <button class="btn btn--ghost btn--sm" id="mk-prev" type="button">&larr; Previous</button>
+        <span id="mk-page"></span>
+        <button class="btn btn--ghost btn--sm" id="mk-next" type="button">Next &rarr;</button>
+      </div>
+    </div>
+
+    <p class="market-note" style="margin-top:1rem">
+      <strong>About prices:</strong> every price here is what the asset actually sold for (what the seller received).
+      "Cheapest sold" is the lowest real sale in the last 30 days. 1 UPX sales are left out (they're creators' giveaways and gifts between accounts, almost never a market price), and so is anything under a quarter of the design's usual price. Designs with no real sale in 30 days show their last sale instead and sort after the rest.
+      Upland keeps asking prices off the chain, so the asking price for a listed serial is only visible inside Upland.
+      "For sale" counts serials whose latest move into Upland's escrow was a listing; "In escrow" also counts items Upland holds for other reasons.
+    </p>
+  </main>
+  <script src="/js/market-common.js"></script>
+  <script src="/js/market.js"></script>
+</body>
+</html>

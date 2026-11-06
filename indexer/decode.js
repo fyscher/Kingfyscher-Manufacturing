@@ -73,6 +73,39 @@ const isSaleTransfer = data =>
   data?.from === "playuplandme" && /is now the owner/.test(data.memo || "");
 
 /**
+ * NFT moves through Upland's escrow (verified 2026-11-03 on 1,000 transfers):
+ * listing = owner -> playuplandme, empty memo; delist = playuplandme -> owner,
+ * empty memo; resale = playuplandme -> buyer, "is now the owner" memo. Upland
+ * also hands out store stock from escrow ("is the initial owner", "owns the
+ * NFT"), so every move out of escrow counts, whatever the memo says.
+ */
+const isEscrowTransfer = data => data?.to === "playuplandme" || data?.from === "playuplandme";
+
+/** One row per NFT per escrow move: which way, who, and what kind of move. */
+function decodeEscrowEvents(transferRows) {
+  const rows = [];
+  for (const t of transferRows) {
+    const d = t.data;
+    if (!isEscrowTransfer(d)) continue;
+    const into = d.to === "playuplandme";
+    const kind = into ? (d.memo ? "other" : "listing") : !d.memo ? "delist" : isSaleTransfer(d) ? "sale" : "store";
+    for (const id of d.dgood_ids || []) {
+      rows.push({
+        id: `${t.global_sequence}:${id}`,
+        global_sequence: t.global_sequence,
+        ts: t.ts,
+        block_num: t.block_num,
+        dgood_id: Number(id),
+        direction: into ? "in" : "out",
+        account: into ? d.from : d.to,
+        kind,
+      });
+    }
+  }
+  return rows;
+}
+
+/**
  * NFT resales. `n112` carries buyer, seller and money; the transfernft in the
  * same transaction names the item. Price is what the seller listed at
  * (p141 - p142): the buyer pays that plus the 5% fee.
@@ -162,6 +195,60 @@ function decodePropertySalesUsd(n52Rows, t2Deltas) {
   });
 }
 
+/**
+ * Constructions. Each starts with a SPARKLT payment to playuplandme, memo
+ * "BUILD,<structure nft>,<property>,<city>,..." (verified 2026-11-03: the 23
+ * BUILD payments naming 1321 Markum Gate Way STE 200 match the structure NFTs
+ * the chain's table a21 places on it). Gives when each building went up.
+ */
+const isBuildPayment = data => typeof data?.memo === "string" && data.memo.startsWith("BUILD,");
+
+function decodeBuilds(rows) {
+  const out = [];
+  for (const r of rows) {
+    if (!isBuildPayment(r.data)) continue;
+    const [, nft, property, city] = r.data.memo.split(",");
+    if (!/^\d+$/.test(nft || "") || !/^\d+$/.test(property || "")) continue;
+    out.push({ nft_id: Number(nft), property_id: property, city_id: /^\d+$/.test(city || "") ? Number(city) : null, ts: r.ts, account: r.data.from ?? null });
+  }
+  return out;
+}
+
+/**
+ * A BUILD memo's rules (verified 2026-11-03):
+ * BUILD,<nft>,<property>,<city>,0,<Sparklet-hours needed>,<min stake x100>,<max stake x100>,structure,<token>,<IPFS>,<start|suspended>.
+ * "suspended" = posted as a construction contract for another player to build.
+ */
+function parseBuildMemo(memo) {
+  const f = String(memo || "").split(",");
+  if (f[0] !== "BUILD" || f.length < 12) return null;
+  const n = v => (/^\d+(\.\d+)?$/.test(v || "") ? Number(v) : null);
+  return { nft_id: n(f[1]), property_id: f[2], hours_needed: n(f[5]), min_stake: n(f[6]) / 100, max_stake: n(f[7]) / 100, token_name: f[9] || null, contract: f[11] === "suspended" };
+}
+
+/**
+ * NFTs that changed hands with a property: a sale's transaction also moves what
+ * was placed on the property from escrow to the buyer, empty memo (verified
+ * 2026-11-03: 89 of 857 sales over two days, 223 NFTs: decor, ornaments,
+ * vehicles, and the building NFTs themselves).
+ */
+function decodeSaleBundles(saleRows, transferRows) {
+  const byTrx = new Map();
+  for (const t of transferRows) {
+    if (t.data?.from !== "playuplandme") continue;
+    if (!byTrx.has(t.trx_id)) byTrx.set(t.trx_id, []);
+    byTrx.get(t.trx_id).push(t.data);
+  }
+  const rows = [];
+  for (const s of saleRows) {
+    for (const t of byTrx.get(s.trx_id) || []) {
+      if (s.buyer && t.to !== s.buyer) continue;
+      for (const id of t.dgood_ids || []) rows.push({ sale_seq: s.global_sequence, dgood_id: Number(id) });
+    }
+  }
+  return rows;
+}
+
 /** Property listing book changes (table t2): an ask appearing, changing or leaving. */
 function decodeListingEvents(t2Deltas) {
   return t2Deltas.map(d => ({
@@ -204,6 +291,12 @@ module.exports = {
   toRawDelta,
   parseSaleMemo,
   isSaleTransfer,
+  isEscrowTransfer,
+  decodeEscrowEvents,
+  isBuildPayment,
+  decodeBuilds,
+  parseBuildMemo,
+  decodeSaleBundles,
   decodeNftSales,
   decodePropertySalesUpx,
   decodePropertySalesUsd,

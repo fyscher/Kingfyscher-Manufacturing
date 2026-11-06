@@ -41,20 +41,6 @@ const api = {
     return fetch('/api/upland/cities').then(r => r.json());
   },
 
-  getRecentPurchases(limit = 15) {
-    return fetch(`/api/upland/appchain/purchases?limit=${limit}`).then(r => r.json());
-  },
-
-  searchProperties(cityId, textSearch) {
-    const params = new URLSearchParams({ cityId, currentPage: 1, pageSize: 20 });
-    if (textSearch) params.set('textSearch', textSearch);
-    return fetch(`/api/upland/properties?${params}`).then(r => r.json());
-  },
-
-  getPropertyPurchases(propertyId) {
-    return fetch(`/api/upland/appchain/purchases/property/${propertyId}?limit=10`).then(r => r.json());
-  },
-
   uplandAuthInit(token) {
     return fetch('/api/upland/auth/init', {
       method: 'POST',
@@ -210,6 +196,7 @@ function showApp() {
   userAvatar.textContent      = avatar(state.username);
   loadUsers();
   navigateTo('dashboard');
+  maOpenFromUrl();
 }
 
 function showResetPassword() {
@@ -581,349 +568,28 @@ modalConfirm.addEventListener('click', async () => {
   }
 });
 
-/* ── Upland: DOM refs ────────────────────────────────────── */
-const purchasesBody     = $('purchases-body');
-const citiesBody        = $('cities-body');
-const citiesCount       = $('cities-count');
-const searchCity        = $('search-city');
-const searchForm        = $('property-search-form');
-const propertyResults   = $('property-results');
-const refreshPurchases  = $('refresh-purchases');
-const statUpland        = $('stat-upland');
-const uplandStatusText  = $('upland-status-text');
-const uplandStatusPill  = $('upland-status-pill');
+/* ── Upland: Cities (for the Building Browser) and the Dashboard's API status ── */
+const statUpland = $('stat-upland');
 
-/* ── Upland: Load cities ─────────────────────────────────── */
 async function loadCities() {
   try {
     const data = await api.getCities();
-    const cities = data.cities || [];
-    state.cities = cities;
-    citiesCount.textContent = cities.length;
+    state.cities = data.cities || [];
     statUpland.textContent = 'Connected';
-    uplandStatusText.textContent = 'API Connected';
-    uplandStatusPill.className = 'status-pill status-pill--online';
-
-    citiesBody.innerHTML = cities
-      .sort((a, b) => a.name.localeCompare(b.name))
-      .map(c => `
-        <tr>
-          <td>${escHtml(c.name)}</td>
-          <td>${escHtml(c.stateName || '')}</td>
-          <td>${escHtml(c.countryName || '')}</td>
-        </tr>
-      `).join('');
-
-    searchCity.innerHTML = '<option value="">Select a city</option>' +
-      cities
-        .sort((a, b) => a.name.localeCompare(b.name))
-        .map(c => `<option value="${c.id}">${escHtml(c.name)}</option>`)
-        .join('');
   } catch {
     statUpland.textContent = 'Error';
-    uplandStatusText.textContent = 'Connection Error';
-    uplandStatusPill.className = 'status-pill status-pill--warning';
   }
 }
-
-/* ── Upland: Load recent purchases ───────────────────────── */
-async function loadPurchases() {
-  purchasesBody.innerHTML = '<tr class="table-empty"><td colspan="4">Loading...</td></tr>';
-  try {
-    const data = await api.getRecentPurchases(15);
-    const purchases = data.purchases || [];
-    if (purchases.length === 0) {
-      purchasesBody.innerHTML = '<tr class="table-empty"><td colspan="4">No recent purchases</td></tr>';
-      return;
-    }
-    purchasesBody.innerHTML = purchases.map(p => {
-      const time = new Date(p.purchasedAt).toLocaleTimeString();
-      const label = p.address || String(p.propertyId);
-      return `
-        <tr class="purchase-row" data-prop-id="${escHtml(String(p.propertyId))}" style="cursor:pointer" title="Click to view property history">
-          <td><span class="id-chip" title="${escHtml(String(p.propertyId))}">${escHtml(label)}</span></td>
-          <td data-city="">—</td>
-          <td>${Number(p.priceUpx).toLocaleString()}</td>
-          <td>${escHtml(time)}</td>
-        </tr>
-      `;
-    }).join('');
-
-    enrichPurchaseRows(purchases);
-  } catch {
-    purchasesBody.innerHTML = '<tr class="table-empty"><td colspan="4">Failed to load</td></tr>';
-  }
-}
-
-async function enrichPurchaseRows(purchases) {
-  const seen = new Set();
-  for (const p of purchases) {
-    const pid = String(p.propertyId);
-    if (seen.has(pid)) continue;
-    seen.add(pid);
-    try {
-      const prop = await fetch(`/api/upland/properties/${pid}`).then(r => r.json());
-      document.querySelectorAll(`tr[data-prop-id="${pid}"]`).forEach(row => {
-        const addrCell = row.children[0];
-        const cityCell = row.querySelector('[data-city]');
-        if (prop.address) addrCell.innerHTML = `<span class="id-chip" title="${escHtml(pid)}">${escHtml(prop.address)}</span>`;
-        if (cityCell && prop.city?.name) cityCell.textContent = prop.city.name;
-      });
-    } catch { /* skip */ }
-  }
-}
-
-/* ── Upland: Property search ─────────────────────────────── */
-searchForm.addEventListener('submit', async e => {
-  e.preventDefault();
-  const cityId = searchCity.value;
-  const text = $('search-address').value.trim();
-  if (!cityId) return;
-
-  propertyResults.innerHTML = '<p style="color:var(--text-muted)">Searching...</p>';
-  try {
-    const data = await api.searchProperties(cityId, text);
-    const results = data.results || [];
-    if (results.length === 0) {
-      propertyResults.innerHTML = '<p style="color:var(--text-muted)">No properties found</p>';
-      return;
-    }
-    propertyResults.innerHTML = `
-      <table class="table">
-        <thead>
-          <tr><th>Address</th><th>Neighborhood</th><th>Status</th><th>Mint Price</th></tr>
-        </thead>
-        <tbody>
-          ${results.map(p => `
-            <tr class="purchase-row" data-prop-id="${p.id}" style="cursor:pointer" title="Click to view purchase history">
-              <td>${escHtml(p.address)}</td>
-              <td>${escHtml(p.neighborhood?.name || '—')}</td>
-              <td><span class="badge badge--${p.status === 'Owned' ? 'muted' : p.status === 'For sale' ? 'warning' : 'muted'}">${escHtml(p.status)}</span></td>
-              <td>${p.mintPrice ? Number(p.mintPrice).toLocaleString() + ' UPX' : '—'}</td>
-            </tr>
-          `).join('')}
-        </tbody>
-      </table>
-    `;
-  } catch {
-    propertyResults.innerHTML = '<p style="color:var(--danger)">Search failed</p>';
-  }
-});
-
-/* ── Upland: Click property row to view history ──────────── */
-document.addEventListener('click', async e => {
-  const row = e.target.closest('.purchase-row[data-prop-id]');
-  if (!row) return;
-  const propId = row.dataset.propId;
-
-  propertyResults.innerHTML = `<p style="color:var(--text-muted)">Loading purchase history for property ${escHtml(propId)}...</p>`;
-  navigateTo('upland');
-
-  try {
-    const data = await api.getPropertyPurchases(propId);
-    const prop = data.property;
-    const purchases = data.purchases || [];
-
-    let html = '';
-    if (prop) {
-      html += `<div class="card" style="margin-bottom:1rem"><div class="card-body">
-        <strong>${escHtml(prop.address)}</strong> &mdash; ${escHtml(prop.city?.name || '')}${prop.neighborhood?.name ? ', ' + escHtml(prop.neighborhood.name) : ''}
-        <br>Status: <span class="badge badge--${prop.status === 'Owned' ? 'muted' : 'warning'}">${escHtml(prop.status)}</span>
-        &nbsp; Mint: ${prop.mintPrice ? Number(prop.mintPrice).toLocaleString() + ' UPX' : '—'}
-      </div></div>`;
-    }
-
-    if (purchases.length === 0) {
-      html += '<p style="color:var(--text-muted)">No on-chain purchase records found in recent history</p>';
-    } else {
-      html += `<table class="table"><thead><tr><th>Buyer (EOS)</th><th>Price</th><th>Date</th></tr></thead><tbody>
-        ${purchases.map(p => `
-          <tr>
-            <td><span class="id-chip">${escHtml(p.buyerEos)}</span></td>
-            <td>${Number(p.priceUpx).toLocaleString()} UPX</td>
-            <td>${new Date(p.purchasedAt).toLocaleString()}</td>
-          </tr>
-        `).join('')}
-      </tbody></table>`;
-    }
-    propertyResults.innerHTML = html;
-  } catch {
-    propertyResults.innerHTML = '<p style="color:var(--danger)">Failed to load property history</p>';
-  }
-});
-
-/* ── Upland: Refresh purchases ───────────────────────────── */
-refreshPurchases.addEventListener('click', loadPurchases);
-
-/* ── Structure Market: API ───────────────────────────────── */
-const marketApi = {
-  getTypes() {
-    return fetch('/api/upland/structures/types').then(r => r.json());
-  },
-  getMarket(buildingTypeId, cityId) {
-    const params = new URLSearchParams({ buildingTypeId });
-    if (cityId) params.set('cityId', cityId);
-    return fetch(`/api/upland/structures/market?${params}`).then(r => r.json());
-  },
-  getSalesHistory() {
-    return fetch('/api/upland/structures/sales-history?limit=30').then(r => r.json());
-  },
-};
-
-/* ── Structure Market: DOM refs ──────────────────────────── */
-const marketTypeSelect    = $('market-type');
-const marketCitySelect    = $('market-city');
-const marketSearchForm    = $('market-search-form');
-const marketSearchBtn     = $('market-search-btn');
-const marketError         = $('market-error');
-const marketResults       = $('market-results');
-const marketEmptyState    = $('market-empty-state');
-const metricFloor         = $('metric-floor');
-const metricCount         = $('metric-count');
-const metricLastSold      = $('metric-last-sold');
-const metricLastSoldDate  = $('metric-last-sold-date');
-const listingsBody        = $('listings-body');
-const listingsCountBadge  = $('listings-count-badge');
-const salesHistoryBody    = $('sales-history-body');
-const salesCountBadge     = $('sales-count-badge');
-
-/* ── Structure Market: Load types ────────────────────────── */
-async function loadStructureTypes() {
-  try {
-    const data = await marketApi.getTypes();
-    const types = data.types || [];
-    if (types.length === 0) {
-      marketTypeSelect.innerHTML = '<option value="">No periods available</option>';
-      return;
-    }
-    marketTypeSelect.innerHTML = '<option value="">Select a time period</option>' +
-      types.map(t => `<option value="${t.id}">${escHtml(t.name)}</option>`).join('');
-  } catch {
-    marketTypeSelect.innerHTML = '<option value="">Failed to load types</option>';
-  }
-}
-
-/* ── Structure Market: Populate city filter ──────────────── */
-function populateMarketCities(cities) {
-  marketCitySelect.innerHTML = '<option value="">All cities</option>' +
-    cities
-      .sort((a, b) => a.name.localeCompare(b.name))
-      .map(c => `<option value="${c.id}">${escHtml(c.name)}</option>`)
-      .join('');
-}
-
-/* ── Structure Market: Render listings ───────────────────── */
-function renderListings(listings) {
-  listingsCountBadge.textContent = listings.length;
-  if (listings.length === 0) {
-    listingsBody.innerHTML = '<tr class="table-empty"><td colspan="5">No listings found for this structure type</td></tr>';
-    return;
-  }
-  listingsBody.innerHTML = listings.map((b, i) => {
-    const name = b.address || b.buildingType?.name || b.type?.name || b.name || b.propertyId || '—';
-    const city = b.city?.name || b.property?.city?.name || '—';
-    const owner = b.owner || b.ownerEosId || b.sellerEosId || '—';
-    const price = b.price != null ? Number(b.price).toLocaleString() : '—';
-    const isFloor = i === 0;
-    return `
-      <tr>
-        <td style="color:var(--text-muted);font-size:0.75rem">${i + 1}</td>
-        <td style="font-weight:${isFloor ? '600' : '400'};color:${isFloor ? 'var(--text)' : 'var(--text-secondary)'}">${escHtml(name)}</td>
-        <td>${escHtml(city)}</td>
-        <td><span class="id-chip">${escHtml(String(owner))}</span></td>
-        <td style="text-align:right;font-weight:${isFloor ? '700' : '500'};color:${isFloor ? 'var(--success)' : 'var(--text-secondary)'}">
-          ${price !== '—' ? price + ' UPX' : '—'}
-          ${isFloor ? ' <span class="badge badge--warning" style="margin-left:0.4rem;font-size:0.62rem">FLOOR</span>' : ''}
-        </td>
-      </tr>
-    `;
-  }).join('');
-}
-
-/* ── Structure Market: Render sales history ──────────────── */
-function renderSalesHistory(sales) {
-  salesCountBadge.textContent = sales.length;
-  if (sales.length === 0) {
-    salesHistoryBody.innerHTML = '<tr class="table-empty"><td colspan="5">No chain sales found</td></tr>';
-    metricLastSold.textContent = '—';
-    metricLastSoldDate.textContent = 'no chain data yet';
-    return;
-  }
-
-  const first = sales[0];
-  const lastPrice = first.priceUpx != null ? Number(first.priceUpx).toLocaleString() + ' UPX' : '?';
-  const lastDate = first.timestamp ? new Date(first.timestamp).toLocaleDateString() : '—';
-  metricLastSold.textContent = lastPrice;
-  metricLastSoldDate.textContent = `last sold ${lastDate}`;
-
-  salesHistoryBody.innerHTML = sales.map(s => {
-    const price = s.priceUpx != null ? Number(s.priceUpx).toLocaleString() + ' UPX' : '—';
-    const date = s.timestamp ? new Date(s.timestamp).toLocaleDateString() : '—';
-    const trx = s.trxId ? s.trxId.slice(0, 10) + '…' : '—';
-    const addr = s.address || s.propertyId || '—';
-    const buyer = s.buyerEos || '—';
-    return `
-      <tr>
-        <td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${escHtml(s.address || '')}">
-          <span class="id-chip">${escHtml(addr)}</span>
-        </td>
-        <td><span class="id-chip">${escHtml(buyer)}</span></td>
-        <td style="text-align:right;font-weight:600;color:var(--primary-lt)">${price}</td>
-        <td style="color:var(--text-muted);white-space:nowrap">${escHtml(date)}</td>
-        <td><span class="id-chip" title="${escHtml(s.trxId || '')}">${escHtml(trx)}</span></td>
-      </tr>
-    `;
-  }).join('');
-}
-
-/* ── Structure Market: Search handler ───────────────────────*/
-marketSearchForm.addEventListener('submit', async e => {
-  e.preventDefault();
-  hideAlert(marketError);
-
-  const buildingTypeId = marketTypeSelect.value;
-  const cityId = marketCitySelect.value;
-
-  if (!buildingTypeId) {
-    showAlert(marketError, 'Please select a time period.');
-    return;
-  }
-
-  setLoading(marketSearchBtn, true);
-  marketResults.classList.add('hidden');
-  marketEmptyState.classList.add('hidden');
-
-  try {
-    const [marketData, salesData] = await Promise.all([
-      marketApi.getMarket(buildingTypeId, cityId),
-      marketApi.getSalesHistory(),
-    ]);
-
-    const listings = marketData.listings || [];
-    const floor = marketData.floor;
-    const count = marketData.count || listings.length;
-    const sales = salesData.sales || [];
-
-    metricFloor.textContent  = floor != null ? Number(floor).toLocaleString() + ' UPX' : '—';
-    metricCount.textContent  = count;
-
-    renderListings(listings);
-    renderSalesHistory(sales);
-
-    marketResults.classList.remove('hidden');
-  } catch (err) {
-    showAlert(marketError, 'Search failed. ' + (err.message || ''));
-    marketEmptyState.classList.remove('hidden');
-  } finally {
-    setLoading(marketSearchBtn, false);
-  }
-});
 
 /* ── Building Browser: DOM refs ──────────────────────────── */
 const buildingSearchForm  = $('building-search-form');
 const buildingSearchBtn   = $('building-search-btn');
 const buildingCitySelect  = $('building-city');
-const buildingAddressInput= $('building-address');
+const buildingTypeSelect  = $('building-type');
+const buildingForSale     = $('building-for-sale');
+const buildingSingle      = $('building-single');
+const buildingUnfinished  = $('building-unfinished');
+const buildingNote        = $('building-note');
 const buildingError       = $('building-error');
 const buildingResults     = $('building-results');
 const buildingEmptyState  = $('building-empty-state');
@@ -940,240 +606,579 @@ function populateBuildingCities(cities) {
       .join('');
 }
 
+/* ── Building Browser: The building dropdown ──────────────
+   Every building type standing in the chosen city, from the indexer's copy of
+   the chain table that places buildings on properties. */
+const fmtUpxShort = n => `${Number(n).toLocaleString()} UPX`;
+let buildingTypesLoaded = false;
+
+async function loadBuildingTypes() {
+  hideAlert(buildingError);
+  const keep = buildingTypeSelect.value;
+  buildingTypeSelect.disabled = true;
+  buildingTypeSelect.innerHTML = '<option value="">Loading buildings…</option>';
+  try {
+    const params = new URLSearchParams();
+    if (buildingCitySelect.value) params.set('cityId', buildingCitySelect.value);
+    const r = await fetch(`/api/upland/structures/building-types?${params}`);
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.error || 'Could not load buildings');
+    // "for sale" counts properties; "from" is the cheapest one with just this building.
+    buildingTypeSelect.innerHTML = '<option value="">Pick a building…</option>' + data.types.map(t =>
+      `<option value="${escHtml(t.type)}">${escHtml(t.name)} · ${Number(t.buildings).toLocaleString()} built` +
+      `${t.underConstruction ? ` (+${Number(t.underConstruction).toLocaleString()} under construction)` : ''}` +
+      `${t.forSale ? `, ${Number(t.forSale).toLocaleString()} for sale${t.cheapestUpx ? ` from ${fmtUpxShort(t.cheapestUpx)}` : ''}` : ''}</option>`).join('');
+    if (keep && data.types.some(t => t.type === keep)) buildingTypeSelect.value = keep;
+    buildingNote.textContent = `${data.types.length} kinds of building` +
+      (data.unidentified ? ` · ${Number(data.unidentified).toLocaleString()} buildings not identified yet` : '') +
+      (data.asOf ? ` · up to date as of ${new Date(data.asOf).toLocaleString()}` : '');
+    buildingTypesLoaded = true;
+  } catch (err) {
+    buildingTypeSelect.innerHTML = '<option value="">Buildings unavailable</option>';
+    showAlert(buildingError, err.message);
+  } finally {
+    buildingTypeSelect.disabled = false;
+  }
+}
+
 /* ── Building Browser: Render results ────────────────────── */
-function renderBuildingResults(properties, searchAddress) {
-  buildingCount.textContent = properties.length;
-  buildingResultsTitle.textContent = `Properties matching "${searchAddress}"`;
+function renderBuildingResults(properties, title, total = properties.length) {
+  buildingCount.textContent = total > properties.length
+    ? `cheapest ${properties.length.toLocaleString()} of ${total.toLocaleString()}`
+    : properties.length.toLocaleString();
+  buildingResultsTitle.textContent = title;
 
   if (properties.length === 0) {
-    buildingBody.innerHTML = '<tr class="table-empty"><td colspan="6">No properties found for that address</td></tr>';
+    buildingBody.innerHTML = `<tr class="table-empty"><td colspan="6">${buildingForSale.checked ? 'None of these are for sale right now' : 'No properties with this building'}</td></tr>`;
     return;
   }
 
-  const forSale = properties.filter(p => p.currentPrice != null && p.status !== 'Owned');
-  const lowestCurrent = forSale.length > 0
-    ? Math.min(...forSale.map(p => p.currentPrice))
-    : null;
-
+  const cheapest = properties.find(p => p.priceUpx > 0)?.priceUpx;
   buildingBody.innerHTML = properties.map(p => {
-    const neighborhood = p.neighborhood?.name || '—';
-    const isForSale = p.status === 'For sale' || p.status === 'Unlocked';
-    const currentPrice = p.currentPrice != null
-      ? Number(p.currentPrice).toLocaleString() + ' UPX'
-      : '—';
-    const isFloorListing = isForSale && p.currentPrice === lowestCurrent;
-
-    const lastSalePrice = p.lastSale?.priceUpx != null
-      ? Number(p.lastSale.priceUpx).toLocaleString() + ' UPX'
-      : '—';
-    const lastSaleDate = p.lastSale?.timestamp
-      ? new Date(p.lastSale.timestamp).toLocaleDateString()
-      : '—';
-
-    const statusClass = p.status === 'Owned' ? 'muted' : p.status === 'For sale' ? 'warning' : 'success';
-
+    const asking = p.priceUpx > 0 ? fmtUpxShort(p.priceUpx)
+      : p.priceUsd > 0 ? `$${Number(p.priceUsd).toLocaleString()}`
+      : '<span style="color:var(--text-muted)">not for sale</span>';
+    const isCheapest = p.priceUpx > 0 && p.priceUpx === cheapest;
     return `
       <tr>
-        <td style="font-weight:500">${escHtml(p.address || '—')}</td>
-        <td style="color:var(--text-secondary)">${escHtml(neighborhood)}</td>
-        <td><span class="badge badge--${statusClass}">${escHtml(p.status || '—')}</span></td>
-        <td style="text-align:right;font-weight:${isFloorListing ? '700' : '500'};color:${isFloorListing ? 'var(--success)' : isForSale ? 'var(--text)' : 'var(--text-muted)'}">
-          ${currentPrice}
-          ${isFloorListing ? ' <span class="badge badge--warning" style="margin-left:0.4rem;font-size:0.62rem">LOWEST</span>' : ''}
+        <td style="font-weight:500">${escHtml(p.address || `Property ${p.id}`)}${p.underConstruction
+          ? `<br><span class="badge badge--warning" style="font-size:0.62rem">Under construction${p.finishesAround ? ` · done ~${escHtml(new Date(p.finishesAround).toLocaleDateString(undefined, { dateStyle: 'medium' }))}` : ''}</span>` : ''}</td>
+        <td style="color:var(--text-secondary)">${escHtml(p.neighborhood || '-')}</td>
+        <td style="color:var(--text-secondary)">${escHtml(p.city || '-')}</td>
+        <td style="text-align:right;${p.buildingsOnProperty > 1 ? 'color:var(--accent-lt);font-weight:600' : 'color:var(--text-muted)'}" title="${p.buildingsOnProperty > 1 ? `A parcel with ${p.buildingsOnProperty} buildings: its price is for all of them` : 'Just this building'}">${p.buildingsOnProperty ?? '-'}</td>
+        <td style="text-align:right">${p.mintPrice != null ? fmtUpxShort(p.mintPrice) : '-'}</td>
+        <td style="text-align:right;font-weight:${isCheapest ? '700' : '500'};color:${isCheapest ? 'var(--success)' : 'var(--text)'}">
+          ${asking}${isCheapest ? ' <span class="badge badge--warning" style="margin-left:0.4rem;font-size:0.62rem">LOWEST</span>' : ''}
         </td>
-        <td style="text-align:right;color:var(--primary-lt);font-weight:500">${lastSalePrice}</td>
-        <td style="color:var(--text-muted);white-space:nowrap">${escHtml(lastSaleDate)}</td>
-      </tr>
-    `;
+      </tr>`;
   }).join('');
 }
 
-/* ── Building Browser: Search handler ───────────────────── */
-buildingSearchForm.addEventListener('submit', async e => {
-  e.preventDefault();
-  hideAlert(buildingError);
+/* ── Building Browser: the chosen building's latest sales, across every city ── */
+const buildingSalesCard = $('building-sales');
+const fmtSalePrice = s => (s.kind === 'usd' ? `$${Number(s.price).toLocaleString()}` : fmtUpxShort(s.price));
+const medianOf = xs => { const v = [...xs].sort((a, b) => a - b); const m = v.length >> 1; return v.length % 2 ? v[m] : (v[m - 1] + v[m]) / 2; };
 
-  const cityId = buildingCitySelect.value;
-  const address = buildingAddressInput.value.trim();
-  if (!address) return;
-
-  setLoading(buildingSearchBtn, true);
-  buildingResults.classList.add('hidden');
-  buildingEmptyState.classList.add('hidden');
-
+async function loadBuildingSales(type, name) {
   try {
-    const params = new URLSearchParams({ address });
-    if (cityId) params.set('cityId', cityId);
-    const data = await fetch(`/api/upland/structures/building-search?${params}`).then(r => r.json());
-    const properties = data.properties || [];
+    const r = await fetch(`/api/upland/structures/building-sales?${new URLSearchParams({ type, limit: '10' })}`);
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.error || 'Could not load sales');
+    $('building-sales-title').textContent = `Last sales of ${name} across Upland`;
+    $('building-sales-count').textContent = data.sales.length;
+    const upx = data.sales.filter(s => s.kind === 'upx').map(s => s.price);
+    const now = data.listedNow;
+    $('building-sales-summary').innerHTML = data.sales.length
+      ? [
+          upx.length ? `Last ${upx.length} UPX sale${upx.length > 1 ? 's' : ''}: <strong style="color:var(--text)">median ${fmtUpxShort(Math.round(medianOf(upx)))}</strong>` +
+            (upx.length > 1 ? `, from ${fmtUpxShort(Math.min(...upx))} to ${fmtUpxShort(Math.max(...upx))}` : '') : '',
+          now.cheapestUpx ? `Cheapest listed now: <strong style="color:var(--success)">${fmtUpxShort(now.cheapestUpx)}</strong> (${Number(now.forSale).toLocaleString()} for sale across Upland)` : `${Number(now.forSale).toLocaleString()} for sale across Upland`,
+        ].filter(Boolean).join(' · ')
+      : 'No sales of properties with this building in the history we have.';
+    $('building-sales-body').innerHTML = data.sales.map(s => `
+      <tr>
+        <td style="white-space:nowrap;color:var(--text-secondary)">${escHtml(new Date(s.ts).toLocaleDateString(undefined, { dateStyle: 'medium' }))}</td>
+        <td style="font-weight:500">${escHtml(s.address || `Property ${s.id}`)}</td>
+        <td style="color:var(--text-secondary)">${escHtml(s.city || '-')}</td>
+        <td style="text-align:right;font-weight:600">${fmtSalePrice(s)}</td>
+      </tr>`).join('');
+    const left = data.leftOut || {};
+    $('building-sales-note').textContent = 'Only sales of properties whose one building is this one, made after it was built. '
+      + [left.parcels ? `${Number(left.parcels).toLocaleString()} sale${left.parcels > 1 ? 's' : ''} of multi-building parcels` : '',
+         left.beforeBuilt ? `${Number(left.beforeBuilt).toLocaleString()} from before it was built` : '',
+         left.unfinished ? `${Number(left.unfinished).toLocaleString()} of properties where it's still under construction` : '']
+        .filter(Boolean).map((x, i, a) => (i === 0 ? 'Left out: ' : '') + x + (i === a.length - 1 ? '. ' : '; ')).join('')
+      + '1 UPX transfers between a player\'s own accounts are left out too.'
+      + (data.salesSince ? ` Sales history since ${new Date(data.salesSince).toLocaleDateString(undefined, { dateStyle: 'medium' })}.` : '');
+    buildingSalesCard.classList.remove('hidden');
+  } catch (err) {
+    buildingSalesCard.classList.add('hidden');
+    showAlert(buildingError, err.message);
+  }
+}
 
-    renderBuildingResults(properties, address);
+/* ── Building Browser: Show the properties with the chosen building ── */
+async function searchBuildings() {
+  hideAlert(buildingError);
+  const type = buildingTypeSelect.value;
+  if (!type) return;
+  setLoading(buildingSearchBtn, true);
+  buildingEmptyState.classList.add('hidden');
+  try {
+    const params = new URLSearchParams({ type });
+    if (buildingCitySelect.value) params.set('cityId', buildingCitySelect.value);
+    if (buildingForSale.checked) params.set('forSale', '1');
+    if (buildingSingle.checked) params.set('single', '1');
+    if (buildingUnfinished.checked) params.set('unfinished', '1');
+    const r = await fetch(`/api/upland/structures/buildings?${params}`);
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.error || 'Search failed');
+    const name = buildingTypeSelect.selectedOptions[0]?.textContent.split(' · ')[0] || type;
+    loadBuildingSales(type, name); // the sales card fills in on its own
+    const where = buildingCitySelect.value ? ` in ${buildingCitySelect.selectedOptions[0].textContent}` : '';
+    renderBuildingResults(data.properties, `${name}${where}${buildingForSale.checked ? ', for sale' : ''}`, data.total);
     buildingResults.classList.remove('hidden');
   } catch (err) {
-    showAlert(buildingError, 'Search failed. ' + (err.message || ''));
+    showAlert(buildingError, err.message);
+    buildingResults.classList.add('hidden');
     buildingEmptyState.classList.remove('hidden');
   } finally {
     setLoading(buildingSearchBtn, false);
   }
+}
+
+buildingSearchForm.addEventListener('submit', e => { e.preventDefault(); searchBuildings(); });
+buildingTypeSelect.addEventListener('change', searchBuildings);
+buildingForSale.addEventListener('change', searchBuildings);
+buildingSingle.addEventListener('change', searchBuildings);
+buildingUnfinished.addEventListener('change', searchBuildings);
+buildingCitySelect.addEventListener('change', async () => { await loadBuildingTypes(); searchBuildings(); });
+document.querySelector('.nav-item[data-section="buildings"]').addEventListener('click', () => {
+  if (!buildingTypesLoaded) loadBuildingTypes();
 });
 
-/* ── Map Assets: API ─────────────────────────────────────── */
-const mapAssetsApi = {
-  getActivity(params = {}) {
-    return fetch(`/api/upland/map-assets/activity?${new URLSearchParams(params)}`).then(r => r.json());
-  },
-  getListings(limit = 50) {
-    return fetch(`/api/upland/map-assets/listings?limit=${limit}`).then(r => r.json());
-  },
-  getPriceHistory(name, days, period = 'day') {
-    return fetch(`/api/upland/map-assets/price-history?${new URLSearchParams({ name, days, period })}`).then(r => r.json());
-  },
-  getMarketOverview() {
-    return fetch('/api/upland/map-assets/market-overview').then(r => r.json());
-  },
-};
+/* ── Property Appraiser ──────────────────────────────────
+   Land from comparable bare-land sales in the neighborhood and the ones
+   bordering it, each building from what buyers paid over the land, map assets
+   from their own resales (indexer/appraisal.js). */
+const apQ       = $('ap-q');
+const apSuggest = $('ap-suggest');
+const apCity    = $('ap-city');
+const apError   = $('ap-error');
+const apState   = { id: null, picks: [], seq: 0, searchSeq: 0, assetSeq: 0, assetMatches: [] };
+const apUpx  = n => (n == null ? '—' : `${Math.round(n).toLocaleString()} UPX`);
+const apX    = n => (n == null ? '—' : `${n.toFixed(2)}x`);
+const apPct  = n => `${Math.round(n * 100)}%`;
+const apDay  = ts => new Date(ts).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
+const apRowStyle = 'padding:0.5rem 0.75rem;cursor:pointer;border-bottom:1px solid var(--border)';
 
-/* ── Map Assets: State / DOM refs ────────────────────────── */
-const maState = { activeTab: 'chart', loading: false, chart: null, chartResizeObs: null, avgPriceUpx: null };
-const maCategorySelect  = $('ma-category');
-const maLimitSelect     = $('ma-limit');
-const maRefreshBtn      = $('map-assets-refresh');
-const maMintsCount      = $('ma-mints-count');
-const maSalesCount      = $('ma-sales-count');
-const maListingsCount   = $('ma-listings-count');
-const maMintsBody       = $('ma-mints-body');
-const maSalesBody       = $('ma-sales-body');
-const maListingsBody    = $('ma-listings-body');
+async function apGet(url) {
+  const r = await fetch(url, { headers: { Authorization: `Bearer ${state.token}` } });
+  if (r.status === 401) { logout(); throw new Error('Signed out'); }
+  const data = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(data.error || `Request failed (${r.status})`);
+  return data;
+}
+
+function populateAppraiserCities(cities) {
+  apCity.innerHTML = '<option value="">All cities</option>' + [...cities]
+    .sort((a, b) => a.name.localeCompare(b.name))
+    .map(c => `<option value="${c.id}">${escHtml(c.name)}</option>`).join('');
+}
+
+async function apSearch(openFirst = false) {
+  const q = apQ.value.trim();
+  if (q.length < 3) { apSuggest.classList.add('hidden'); return; }
+  const seq = ++apState.searchSeq;
+  try {
+    const params = new URLSearchParams({ q });
+    if (apCity.value) params.set('cityId', apCity.value);
+    const { results } = await apGet(`/api/upland/appraiser/search?${params}`);
+    if (seq !== apState.searchSeq) return;
+    if (openFirst && results.length) { apSuggest.classList.add('hidden'); apOpen(results[0].id); return; }
+    apSuggest.innerHTML = results.length
+      ? results.map(p => `
+        <div data-id="${escHtml(p.id)}" style="${apRowStyle}">
+          <div style="font-size:0.84rem;color:var(--text);font-weight:500">${escHtml(p.address || p.id)}</div>
+          <div style="font-size:0.72rem;color:var(--text-muted)">${escHtml(p.city || '')}${p.neighborhood ? ` · ${escHtml(p.neighborhood)}` : ''}${p.mint ? ` · mint ${apUpx(p.mint)}` : ''}</div>
+        </div>`).join('')
+      : '<div style="padding:0.6rem 0.75rem;font-size:0.8rem;color:var(--text-muted)">No address starts with that. Start with the house number, the way Upland writes it (131 FRANKLIN ST).</div>';
+    apSuggest.classList.remove('hidden');
+  } catch (err) {
+    showAlert(apError, err.message);
+  }
+}
+
+async function apOpen(id, { keepPicks = false } = {}) {
+  if (!keepPicks) apState.picks = [];
+  apState.id = id;
+  hideAlert(apError);
+  const seq = ++apState.seq;
+  try {
+    const params = new URLSearchParams();
+    if (apState.picks.length) params.set('picks', apState.picks.map(p => `${p.category}/${p.token}*${p.count}`).join(','));
+    const d = await apGet(`/api/upland/appraiser/property/${encodeURIComponent(id)}?${params}`);
+    if (seq !== apState.seq) return;
+    apRender(d);
+  } catch (err) {
+    showAlert(apError, err.message);
+  }
+}
+
+const AP_SOURCES = {
+  listing: () => 'Escrowed with its listing right now',
+  'last sale': d => `Handed over at its last sale${d.lastSaleAt ? ` (${apDay(d.lastSaleAt)})` : ''}; may have been moved since, so not counted`,
+  'added by you': () => 'Added by you',
+};
+const AP_RINGS = { own: 'this neighborhood', bordering: 'bordering', 'two rings out': 'two rings out', city: 'elsewhere in the city' };
+
+function apRender(d) {
+  const p = d.property;
+  const t = d.totals;
+  $('ap-title').textContent = p.address || `Property ${p.id}`;
+  $('ap-sub').textContent = [p.city, p.neighborhood, p.mint ? `mint ${apUpx(p.mint)}` : null, p.status, `id ${p.id}`].filter(Boolean).join(' · ');
+
+  $('ap-stat-total').textContent = t ? apUpx(t.value) : '—';
+  $('ap-stat-total-range').textContent = t ? `typical ${apUpx(t.low)} to ${apUpx(t.high)}` : 'no land estimate';
+  $('ap-stat-land').textContent = d.land ? apUpx(d.land.value) : '—';
+  $('ap-stat-land-range').textContent = d.land ? `${apUpx(d.land.low)} to ${apUpx(d.land.high)}` : '';
+  const finished = d.buildings.filter(b => !b.unfinished);
+  const unfinished = d.buildings.length - finished.length;
+  $('ap-stat-buildings').textContent = finished.length ? apUpx(finished.reduce((s, b) => s + (b.value || 0), 0)) : 'None';
+  $('ap-stat-buildings-note').textContent = [
+    finished.length ? `${finished.length} finished` : null,
+    d.unvaluedBuildings ? `${d.unvaluedBuildings} not valued` : null,
+    unfinished ? `${unfinished} under construction, not counted` : null,
+  ].filter(Boolean).join(' · ');
+  $('ap-stat-assets').textContent = t && t.assets ? apUpx(t.assets) : '—';
+  $('ap-stat-with-assets').textContent = t && t.assets ? `with them: ${apUpx(t.withAssets)}` : 'none counted yet';
+  const ask = d.listing;
+  $('ap-stat-ask').textContent = ask ? (ask.upx ? apUpx(ask.upx) : ask.usd ? `$${ask.usd.toLocaleString()}` : '—') : 'Not listed';
+  const askUpx = ask ? ask.upx || ask.usdInUpx : null;
+  $('ap-stat-ask-note').textContent = ask && askUpx && t
+    ? `${askUpx >= t.withAssets ? `${apPct(askUpx / t.withAssets - 1)} above` : `${apPct(1 - askUpx / t.withAssets)} below`} the appraisal${ask.usd && !ask.upx ? ` (at ~${d.stats.usd ? d.stats.usd.upxPerUsd.toLocaleString() : '?'} UPX per $1)` : ''}`
+    : '';
+
+  // Land
+  const l = d.land;
+  $('ap-comps-count').textContent = l ? l.comps : 0;
+  $('ap-land-note').textContent = l
+    ? `${l.comps} bare-land UPX sales from ${l.scope}, last ${l.days} days (this neighborhood counts double): land here sells for ${apX(l.ratio.p50)} its mint, middle half ${apX(l.ratio.p25)} to ${apX(l.ratio.p75)}.${l.thin ? ' Few sales to go on: treat it as rough.' : ''}`
+    : p.mint ? 'No comparable bare-land sales nearby to go on.' : 'This property has no mint price in the catalog, so the land can\'t be valued.';
+  $('ap-comps-body').innerHTML = l && l.recent.length
+    ? l.recent.map(c => `
+      <tr>
+        <td>${apDay(c.ts)}</td>
+        <td>${escHtml(c.address || c.propertyId)}</td>
+        <td class="muted">${escHtml(c.ring === 'own' ? (p.neighborhood || 'this neighborhood') : (c.neighborhood_name ? `${c.neighborhood_name} (${AP_RINGS[c.ring] || c.ring})` : AP_RINGS[c.ring] || c.ring))}</td>
+        <td class="num">${apUpx(c.price)}</td>
+        <td class="num">${apUpx(c.mint)}</td>
+        <td class="num">${apX(c.ratio)}</td>
+      </tr>`).join('')
+    : '<tr class="table-empty"><td colspan="6">No comparable sales</td></tr>';
+
+  // Buildings
+  $('ap-buildings-count').textContent = d.buildings.length;
+  $('ap-buildings-note').textContent = [
+    'A building never sells on its own, so its value is what buyers paid over the land: each sale of a property with just that building, minus the land estimate at the time, median over 180 days.',
+    d.buildingsNote,
+  ].filter(Boolean).join(' ');
+  $('ap-buildings-body').innerHTML = d.buildings.length
+    ? d.buildings.map(b => `
+      <tr>
+        <td>${escHtml(b.name)}</td>
+        <td class="muted">${b.unfinished ? `Under construction${b.finishes ? `, finishes ~${apDay(b.finishes)}` : ''}` : b.builtAt ? `Built ${apDay(b.builtAt)}` : 'Finished'}</td>
+        <td class="num">${b.value == null ? '<span class="muted">not valued</span>' : apUpx(b.value)}</td>
+        <td class="num">${b.value == null ? '—' : `${apUpx(b.low)} to ${apUpx(b.high)}`}</td>
+        <td class="muted" style="font-size:0.78rem">${b.value == null
+          ? `Only ${b.sales} sale${b.sales === 1 ? '' : 's'} of this building: too few (needs ${d.minBuildingSales})`
+          : `${b.sales.toLocaleString()} sales${b.band && b.band[0] != null ? `; median likely ${apUpx(b.band[0])} to ${apUpx(b.band[1])}` : ''}${b.pairs ? `; same property sold before and after building: ${apUpx(b.pairMedian)} (${b.pairs})` : ''}`}${b.toBuild
+          ? `<br>To have one built: ${b.toBuild.basis === 'contracts' ? `${apUpx(b.toBuild.value)} (median of ${b.toBuild.n} contracts)` : `~${apUpx(b.toBuild.value)} (its Sparklet-hours at the going contract rate)`}`
+          : ''}</td>
+      </tr>`).join('')
+    : '<tr class="table-empty"><td colspan="5">No buildings on this property</td></tr>';
+
+  // Map assets
+  const decor = d.stats.decor;
+  $('ap-assets-count').textContent = d.assets.reduce((s, a) => s + a.count, 0);
+  $('ap-assets-note').textContent = [
+    'Upland only records what\'s placed on a property when it\'s listed (escrowed with the listing) or sold (handed to the buyer). Anything else, add below.',
+    d.untrackedNfts ? `${d.untrackedNfts} other NFT${d.untrackedNfts === 1 ? '' : 's'} came with it that aren't map assets we track.` : null,
+    decor && decor.medianWith && decor.medianWithout
+      ? `Do buyers pay for them? Bare land sold with decorations went for ${apPct(Math.abs(decor.medianWith / decor.medianWithout - 1))} ${decor.medianWith >= decor.medianWithout ? 'more' : 'less'} than land without, against the same land estimate (median of ${decor.withNfts.toLocaleString()} vs ${decor.without.toLocaleString()} sales). So the total "with them" is what they'd fetch sold separately, not what they add to the property.`
+      : null,
+  ].filter(Boolean).join(' ');
+  $('ap-assets-body').innerHTML = d.assets.length
+    ? d.assets.map((a, i) => `
+      <tr>
+        <td>${escHtml(a.name)}</td>
+        <td class="muted" style="font-size:0.78rem">${escHtml((AP_SOURCES[a.source] || (() => a.source))(d))}</td>
+        <td class="num">${a.count}</td>
+        <td class="num">${apUpx(a.value)}</td>
+        <td class="num">${a.value == null ? '—' : apUpx(a.value * a.count)}</td>
+        <td class="muted" style="font-size:0.78rem">${a.sales ? `${a.sales} sales, ${a.windowDays ? `${a.windowDays} days` : 'all stored history'}${a.thin ? ' (thin)' : ''}` : 'No real sales stored'}</td>
+        <td>${a.source === 'added by you' ? `<button class="btn btn--ghost btn--sm" data-ap-remove="${i}">Remove</button>` : ''}</td>
+      </tr>`).join('')
+    : '<tr class="table-empty"><td colspan="7">None recorded</td></tr>';
+  apState.rendered = d.assets;
+
+  // History
+  $('ap-history-count').textContent = d.history.length;
+  $('ap-history-body').innerHTML = d.history.length
+    ? d.history.map(h => `
+      <tr>
+        <td>${apDay(h.ts)}</td>
+        <td class="num">${h.currency === 'UPX' ? apUpx(h.price) : `$${Number(h.price).toLocaleString()}`}</td>
+        <td class="num">${h.nfts || '<span class="muted">0</span>'}</td>
+      </tr>`).join('')
+    : '<tr class="table-empty"><td colspan="3">No sales since the appchain started (April 2025)</td></tr>';
+
+  // Trust
+  const bt = d.stats.backtest;
+  $('ap-method').innerHTML = [
+    bt && bt.land.n ? `Tested on the last ${bt.days} days of sales, each appraised only from sales before it: <strong>land alone was off by a median ${apPct(bt.land.medianError)}</strong> (${bt.land.n.toLocaleString()} sales), within 25% on ${apPct(bt.land.within25)} of them, and the real price fell inside the low-to-high range ${apPct(bt.land.insideRange)} of the time (a middle-half range should catch about half).` : null,
+    bt && bt.withBuilding.n ? `Land plus one building: off by a median ${apPct(bt.withBuilding.medianError)} (${bt.withBuilding.n.toLocaleString()} sales).` : null,
+    d.stats.usd ? `USD prices are a separate market: the property market prices UPX at about ${d.stats.usd.upxPerUsd.toLocaleString()} per $1 (bare land, 90 days), not the store's 1,000, and USD asks are converted at that rate.` : null,
+    'A sale under 1 UPX is a transfer, not a price, and is left out everywhere.',
+  ].filter(Boolean).join('<br>');
+  $('ap-results').classList.remove('hidden');
+}
+
+// Map assets the user says are on it.
+const apAssetQ = $('ap-asset-q');
+const apAssetSuggest = $('ap-asset-suggest');
+let apAssetTimer;
+apAssetQ.addEventListener('input', () => {
+  clearTimeout(apAssetTimer);
+  apAssetTimer = setTimeout(async () => {
+    const q = apAssetQ.value.trim();
+    if (q.length < 2) { apAssetSuggest.classList.add('hidden'); return; }
+    const seq = ++apState.assetSeq;
+    try {
+      const list = await maFindAssets(q);
+      if (seq !== apState.assetSeq) return;
+      apState.assetMatches = list;
+      apAssetSuggest.innerHTML = list.length
+        ? list.map((a, i) => `
+          <div data-index="${i}" style="${apRowStyle}">
+            <div style="font-size:0.84rem;color:var(--text);font-weight:500">${escHtml(a.display_name || a.token_name)}</div>
+            <div style="font-size:0.72rem;color:var(--text-muted)">${escHtml(a.categoryLabel)} · ${a.sales_30d} sold in 30 days</div>
+          </div>`).join('')
+        : '<div style="padding:0.6rem 0.75rem;font-size:0.8rem;color:var(--text-muted)">No map asset with that name</div>';
+      apAssetSuggest.classList.remove('hidden');
+    } catch (err) {
+      showAlert(apError, err.message);
+    }
+  }, 250);
+});
+apAssetSuggest.addEventListener('click', e => {
+  const row = e.target.closest('[data-index]');
+  if (!row || !apState.id) return;
+  const a = apState.assetMatches[Number(row.dataset.index)];
+  const have = apState.picks.find(p => p.category === a.category && p.token === a.token_name);
+  if (have) have.count++;
+  else apState.picks.push({ category: a.category, token: a.token_name, count: 1 });
+  apAssetQ.value = '';
+  apAssetSuggest.classList.add('hidden');
+  apOpen(apState.id, { keepPicks: true });
+});
+$('ap-assets-body').addEventListener('click', e => {
+  const btn = e.target.closest('[data-ap-remove]');
+  if (!btn) return;
+  const a = apState.rendered[Number(btn.dataset.apRemove)];
+  apState.picks = apState.picks.filter(p => !(p.category === a.category && p.token === a.token));
+  apOpen(apState.id, { keepPicks: true });
+});
+
+let apTimer;
+apQ.addEventListener('input', () => { clearTimeout(apTimer); apTimer = setTimeout(() => apSearch(), 250); });
+apCity.addEventListener('change', () => apSearch());
+$('ap-form').addEventListener('submit', e => { e.preventDefault(); apSearch(true); });
+apSuggest.addEventListener('click', e => {
+  const row = e.target.closest('[data-id]');
+  if (!row) return;
+  apSuggest.classList.add('hidden');
+  apOpen(row.dataset.id);
+});
+document.addEventListener('click', e => {
+  if (!e.target.closest('#ap-suggest') && e.target !== apQ) apSuggest.classList.add('hidden');
+  if (!e.target.closest('#ap-asset-suggest') && e.target !== apAssetQ) apAssetSuggest.classList.add('hidden');
+});
+
+/* ── Build Calculator ────────────────────────────────────
+   Construction progress is Sparklet-hours: each staked Sparklet adds one an
+   hour, so time = hours needed / stake (checked against the chain's own
+   expected finish). The stake comes back when the build is done. */
+const bcState = { types: null, stats: null };
+// Mirrors buildCost in indexer/appraisal.js: the median contract with 3+ in 90 days, else hours at the going rate.
+function bcBuildCost(t) {
+  if (t.contractN >= 3) return `${apUpx(t.contractMedian)} <span class="muted">(${t.contractN})</span>`;
+  const rate = bcState.stats && bcState.stats.contracts;
+  return rate ? `~${apUpx((t.hoursNeeded * rate.p50) / 1e6)} <span class="muted">(rate)</span>` : '<span class="muted">-</span>';
+}
+const bcDur = h => (h < 48 ? `${Math.round(h)} h` : h < 24 * 365 ? `${(h / 24).toFixed(h < 240 ? 1 : 0)} days` : `${(h / 24 / 365).toFixed(1)} years`);
+
+async function loadBuildRules() {
+  hideAlert($('bc-error'));
+  try {
+    const d = await apGet('/api/upland/appraiser/build-rules');
+    bcState.types = d.types;
+    bcState.stats = d.stats;
+    bcRender();
+  } catch (err) {
+    showAlert($('bc-error'), err.message);
+    $('bc-body').innerHTML = '<tr class="table-empty"><td colspan="8">Nothing to show</td></tr>';
+  }
+}
+
+function bcRender() {
+  if (!bcState.types) return;
+  const raw = Number($('bc-amount').value);
+  const stake = raw > 0 ? raw * ($('bc-unit').value === 'spark' ? 1000 : 1) : null;
+  const f = $('bc-filter').value.trim().toLowerCase();
+  const rows = bcState.types.filter(t => !f || String(t.name).toLowerCase().includes(f));
+  $('bc-count').textContent = rows.length;
+  $('bc-note').textContent = `Rules from the ${bcState.types.reduce((s, t) => s + t.builds90d, 0).toLocaleString()} builds started in the last 90 days (Upland lists no hub catalog, so a model nobody has started lately isn't here). `
+    + 'Your stake is capped at the building\'s maximum and must reach its minimum. "Have it built" is what owners paid builders to take the job (median of 3+ contracts in 90 days; otherwise its Sparklet-hours at the going rate'
+    + (bcState.stats.contracts ? `, ${Math.round(bcState.stats.contracts.p50).toLocaleString()} UPX per million Sparklet-hours over ${bcState.stats.contracts.n.toLocaleString()} contracts` : '')
+    + '). "Buyers pay over land" is the median a finished one adds to a property\'s price.';
+  $('bc-body').innerHTML = rows.length
+    ? rows.map(t => {
+      const yours = stake == null ? '<span class="muted">enter a stake</span>'
+        : stake < t.minStake ? `<span class="muted">needs ${t.minStake.toLocaleString()}</span>`
+        : `${bcDur(t.hoursNeeded / Math.min(stake, t.maxStake))}${stake > t.maxStake ? ' <span class="muted">(at max)</span>' : ''}`;
+      return `
+      <tr>
+        <td>${escHtml(t.name)}</td>
+        <td class="num">${t.builds90d.toLocaleString()}${t.contracts90d ? ` <span class="muted">(${t.contracts90d} contracts)</span>` : ''}</td>
+        <td class="num">${t.minStake.toLocaleString()} / ${t.maxStake.toLocaleString()}</td>
+        <td class="num">${t.hoursNeeded.toLocaleString()}</td>
+        <td class="num">${yours}</td>
+        <td class="num">${bcDur(t.hoursNeeded / t.maxStake)}</td>
+        <td class="num">${bcBuildCost(t)}</td>
+        <td class="num">${t.sales >= 5 ? `${apUpx(t.median)} <span class="muted">(${t.sales})</span>` : '<span class="muted">too few sales</span>'}</td>
+      </tr>`;
+    }).join('')
+    : '<tr class="table-empty"><td colspan="8">No building by that name</td></tr>';
+}
+
+['bc-amount', 'bc-filter'].forEach(id => $(id).addEventListener('input', bcRender));
+$('bc-unit').addEventListener('change', bcRender);
+$('bc-form').addEventListener('submit', e => e.preventDefault());
+$('bc-balance').addEventListener('click', async () => {
+  const note = $('bc-balance-note');
+  try {
+    const b = await apGet('/api/upland/user/balances');
+    // Upland's availableSpark is in Sparklet, despite the name (checked against a real account's balance, 2026-11-03).
+    $('bc-amount').value = b.availableSpark ?? 0;
+    $('bc-unit').value = 'sparklet';
+    note.textContent = `From Upland: ${Number(b.availableSpark ?? 0).toLocaleString()} Sparklet available${b.stakedSpark ? `, ${Number(b.stakedSpark).toLocaleString()} staked` : ''}.`;
+    bcRender();
+  } catch (err) {
+    note.textContent = /not connected/i.test(err.message)
+      ? 'Your Upland account isn\'t connected here, so enter your stake by hand.'
+      : `Couldn't read your balance: ${err.message}`;
+  }
+});
+document.querySelector('.nav-item[data-section="buildcalc"]').addEventListener('click', () => {
+  if (!bcState.types) loadBuildRules();
+});
+
+/* ── Map Assets: State ───────────────────────────────────── */
+const maState = { chart: null, chartResizeObs: null, asset: null };
 
 /* ── Map Assets: Helpers ─────────────────────────────────── */
-const CATEGORY_LABELS = {
-  outdoordecor: 'Outdoor Decor',
-  structornmt:  'Struct. Ornament',
-  uppie:        'Uppie',
-  seeds:        'Seed',
-  vehicle:      'Vehicle',
-  landvehicle:  'Land Vehicle',
-};
-
-function maCategoryBadge(cat) {
-  const label = CATEGORY_LABELS[cat] || (cat || '—');
-  const color = cat === 'uppie' ? 'var(--primary-lt)'
-    : cat === 'outdoordecor'   ? 'var(--success)'
-    : cat === 'seeds'          ? 'var(--accent-lt)'
-    : 'var(--text-muted)';
-  return `<span style="font-size:0.72rem;padding:0.15rem 0.5rem;border-radius:4px;background:var(--bg-elevated);color:${color};white-space:nowrap">${escHtml(label)}</span>`;
-}
-
-function maRelDate(ts) {
-  if (!ts) return '—';
-  const d = new Date(ts);
-  const diffMs = Date.now() - d.getTime();
-  const diffMin = Math.floor(diffMs / 60000);
-  if (diffMin < 1)  return 'just now';
-  if (diffMin < 60) return `${diffMin}m ago`;
-  const diffH = Math.floor(diffMin / 60);
-  if (diffH < 24)   return `${diffH}h ago`;
-  return d.toLocaleDateString();
-}
-
 function maFmtUpx(n) {
-  return n != null ? `${Number(n).toLocaleString()} UPX` : '—';
+  return n != null ? `${Number(n).toLocaleString()} UPX` : '-';
 }
 
-/* ── Map Assets: Render overview KPIs ───────────────────── */
-function renderMaOverview(data) {
-  const fmt = n => n != null ? Number(n).toLocaleString() : '—';
-  $('ma-kpi-mints').textContent    = fmt(data.mintsToday);
-  $('ma-kpi-sales').textContent    = fmt(data.salesToday);
-  $('ma-kpi-avg').textContent      = data.avgPriceUpx != null ? maFmtUpx(data.avgPriceUpx) : '—';
-  $('ma-kpi-listings').textContent = fmt(data.activeListings);
+/* ── Map Assets: Find an asset to chart ───────────────────
+   Type or paste a name; matches come from the indexer's full design list
+   (most traded first). The old dropdown only knew names seen in the last
+   few on-chain events. */
+const maSearch  = $('ma-nft-search');
+const maSuggest = $('ma-nft-suggest');
+let maMatches = [];
+let maSearchSeq = 0;
+
+async function maFindAssets(q) {
+  const params = new URLSearchParams({ q, sort: 'traded', pageSize: '10' });
+  const r = await fetch(`/api/upland/market/assets?${params}`, { headers: { Authorization: `Bearer ${state.token}` } });
+  if (r.status === 401) { logout(); return []; }
+  const data = await r.json();
+  if (!r.ok) throw new Error(data.error || 'Search failed');
+  return data.assets;
 }
 
-/* ── Map Assets: Render mints + sales ────────────────────── */
-function renderMaEvents(events) {
-  const mints = events.filter(e => e.type === 'mint');
-  const sales = events.filter(e => e.type === 'sale');
-  maMintsCount.textContent = mints.length;
-  maSalesCount.textContent = sales.length;
+function maHideSuggest() { maSuggest.classList.add('hidden'); }
 
-  maMintsBody.innerHTML = mints.length === 0
-    ? '<tr class="table-empty"><td colspan="5">No mints found for this filter</td></tr>'
-    : mints.map(e => `
-      <tr>
-        <td style="font-weight:500">${escHtml(e.displayName || `NFT #${e.nftId}`)}</td>
-        <td>${maCategoryBadge(e.category)}</td>
-        <td style="text-align:right;color:var(--text-muted)">${e.mint != null ? '#' + e.mint : '—'}</td>
-        <td><span class="id-chip" title="${escHtml(e.buyerEos || '')}">${escHtml(e.uplandUser || e.buyerEos || '—')}</span></td>
-        <td style="color:var(--text-muted);white-space:nowrap">${maRelDate(e.timestamp)}</td>
-      </tr>`).join('');
-
-  maSalesBody.innerHTML = sales.length === 0
-    ? '<tr class="table-empty"><td colspan="6">No secondary sales found for this filter</td></tr>'
-    : sales.map(e => {
-      const price = e.priceUpx != null
-        ? `<span style="font-weight:700;color:var(--primary-lt)">${Number(e.priceUpx).toLocaleString()} UPX</span>`
-        : '<span style="color:var(--text-muted)">—</span>';
-      return `
-        <tr>
-          <td style="font-weight:500">${escHtml(e.displayName || `NFT #${e.nftId}`)}</td>
-          <td>${maCategoryBadge(e.category)}</td>
-          <td style="text-align:right;color:var(--text-muted)">${e.mint != null ? '#' + e.mint : '—'}</td>
-          <td style="text-align:right">${price}</td>
-          <td><span class="id-chip" title="${escHtml(e.buyerEos || '')}">${escHtml(e.uplandUser || e.buyerEos || '—')}</span></td>
-          <td style="color:var(--text-muted);white-space:nowrap">${maRelDate(e.timestamp)}</td>
-        </tr>`;
-    }).join('');
+function maRenderSuggest(list) {
+  maSuggest.innerHTML = list.length
+    ? list.map((a, i) => `
+      <div class="ma-suggest-row" data-index="${i}" style="padding:0.5rem 0.75rem;cursor:pointer;border-bottom:1px solid var(--border)">
+        <div style="font-size:0.84rem;color:var(--text);font-weight:500">${escHtml(a.display_name || a.token_name)}</div>
+        <div style="font-size:0.72rem;color:var(--text-muted)">${escHtml(a.categoryLabel)} · ${a.sales_30d} sold in 30 days${a.floor_30d != null ? ` · cheapest ${maFmtUpx(a.floor_30d)}` : ''}</div>
+      </div>`).join('')
+    : '<div style="padding:0.6rem 0.75rem;font-size:0.8rem;color:var(--text-muted)">No asset with that name</div>';
+  maSuggest.classList.remove('hidden');
 }
 
-/* ── Map Assets: Render listings (with below-avg badge) ──── */
-function renderMaListings(listings, avgPrice) {
-  maListingsCount.textContent = listings.length;
-
-  maListingsBody.innerHTML = listings.length === 0
-    ? '<tr class="table-empty"><td colspan="6">No active UPX listings found</td></tr>'
-    : listings.map(l => {
-      const priceStr = l.priceUpx != null
-        ? `<span style="font-weight:700;color:var(--primary-lt)">${Number(l.priceUpx).toLocaleString()} UPX</span>`
-        : '—';
-      const trx = l.trxId ? l.trxId.slice(0, 10) + '…' : '—';
-      const isBelow = avgPrice && l.priceUpx && l.priceUpx < avgPrice * 0.9;
-      const belowBadge = isBelow
-        ? '<span style="font-size:0.65rem;padding:0.1rem 0.4rem;border-radius:4px;background:var(--success-glow);color:var(--success);display:block;margin-top:2px;font-weight:600">BELOW AVG</span>'
-        : '';
-      const vsAvg = avgPrice && l.priceUpx
-        ? `<span style="font-size:0.75rem;color:${l.priceUpx < avgPrice ? 'var(--success)' : 'var(--text-muted)'}">
-             ${l.priceUpx < avgPrice ? '▼' : '▲'} ${Math.abs(Math.round((l.priceUpx / avgPrice - 1) * 100))}%
-           </span>`
-        : '<span style="color:var(--text-muted)">—</span>';
-      return `
-        <tr>
-          <td><span class="id-chip">${escHtml(l.nftId || '—')}</span></td>
-          <td><span class="id-chip">${escHtml(l.sellerEos || '—')}</span></td>
-          <td style="text-align:right">${priceStr}${belowBadge}</td>
-          <td style="text-align:right">${vsAvg}</td>
-          <td style="color:var(--text-muted);white-space:nowrap">${maRelDate(l.timestamp)}</td>
-          <td><span class="id-chip" title="${escHtml(l.trxId || '')}">${escHtml(trx)}</span></td>
-        </tr>`;
-    }).join('');
+function chooseMaAsset(a) {
+  maState.asset = { category: a.category, token: a.token_name };
+  maSearch.value = a.display_name || a.token_name;
+  maHideSuggest();
+  loadMaChart();
 }
 
-/* ── Map Assets: Populate NFT name selector ──────────────── */
-function populateMaNftNames(events) {
-  const sel = $('ma-nft-name');
-  const current = sel.value;
-  const seen = new Set();
-  const names = [];
+let maSearchTimer;
+maSearch.addEventListener('input', () => {
+  clearTimeout(maSearchTimer);
+  const q = maSearch.value.trim();
+  if (q.length < 2) { maHideSuggest(); return; }
+  maSearchTimer = setTimeout(async () => {
+    const seq = ++maSearchSeq;
+    try {
+      const list = await maFindAssets(q);
+      if (seq !== maSearchSeq) return;
+      maMatches = list;
+      maRenderSuggest(list);
+    } catch { maHideSuggest(); }
+  }, 250);
+});
 
-  for (const e of events) {
-    if (e.displayName && !seen.has(e.displayName)) {
-      seen.add(e.displayName);
-      names.push(e.displayName);
-    }
-  }
-  names.sort();
+// Enter takes an exact name match (a pasted title) if there is one, else the top match.
+maSearch.addEventListener('keydown', async e => {
+  if (e.key === 'Escape') { maHideSuggest(); return; }
+  if (e.key !== 'Enter') return;
+  e.preventDefault();
+  const q = maSearch.value.trim();
+  if (!q) return;
+  clearTimeout(maSearchTimer);
+  const seq = ++maSearchSeq;
+  try {
+    const list = await maFindAssets(q);
+    if (seq !== maSearchSeq) return;
+    const exact = list.find(a => (a.display_name || '').toLowerCase() === q.toLowerCase());
+    if (exact || list[0]) chooseMaAsset(exact || list[0]);
+    else { maMatches = []; maRenderSuggest([]); }
+  } catch { maHideSuggest(); }
+});
 
-  sel.innerHTML = '<option value="">Select NFT type…</option>' +
-    names.map(n => `<option value="${escHtml(n)}"${n === current ? ' selected' : ''}>${escHtml(n)}</option>`).join('');
+maSuggest.addEventListener('mousedown', e => {
+  const row = e.target.closest('.ma-suggest-row');
+  if (row) chooseMaAsset(maMatches[Number(row.dataset.index)]);
+});
+maSearch.addEventListener('blur', () => setTimeout(maHideSuggest, 150));
+
+/* An asset sent over from the full-window browser: /?asset=<category>/<token> */
+function maOpenFromUrl() {
+  const asset = new URLSearchParams(location.search).get('asset');
+  if (!asset || !asset.includes('/')) return;
+  const [category, token] = asset.split('/');
+  history.replaceState(null, '', location.pathname);
+  document.querySelector('.nav-item[data-section="map-assets"]').click();
+  maState.asset = { category, token };
+  loadMaChart();
 }
 
 /* ── Map Assets: Chart lifecycle ────────────────────────── */
@@ -1222,17 +1227,7 @@ function buildMaChart(candles) {
   maState.chartResizeObs = obs;
 }
 
-/* ── Map Assets: say how much history the chart really covers ── */
-function maCoverageText(cov) {
-  if (!cov) return '';
-  if (cov.complete) return `Covers the full ${cov.requestedDays} days requested.`;
-  const from  = new Date(cov.from);
-  const hours = Math.max(1, Math.round((Date.now() - from.getTime()) / 3_600_000));
-  const span  = hours < 48 ? `${hours} hours` : `${Math.round(hours / 24)} days`;
-  return `Only the last ~${span} of sales could be priced (since ${from.toISOString().slice(0, 16).replace('T', ' ')} UTC), not the ${cov.requestedDays} days requested.`;
-}
-
-function maShowCoverage(afterEl, cov) {
+function maShowCoverage(afterEl, text) {
   let el = $('ma-chart-coverage');
   if (!el) {
     el = document.createElement('div');
@@ -1240,14 +1235,16 @@ function maShowCoverage(afterEl, cov) {
     el.style.cssText = 'font-size:12px;color:#94a3b8;margin-top:8px';
     afterEl.after(el);
   }
-  el.textContent = maCoverageText(cov);
+  el.textContent = text || '';
 }
 
-/* ── Map Assets: Load chart for selected NFT ─────────────── */
+/* ── Map Assets: Load chart for the chosen asset ─────────────
+   Daily candles of what sellers received, from the indexer (1 UPX giveaways
+   left out), cut to the chosen period. */
 async function loadMaChart() {
-  const name = $('ma-nft-name').value;
-  const days = $('ma-period').value;
-  if (!name) return;
+  const asset = maState.asset;
+  const days  = Number($('ma-period').value);
+  if (!asset) return;
 
   const placeholder = $('ma-chart-placeholder');
   const chartMsg    = $('ma-chart-msg');
@@ -1256,95 +1253,43 @@ async function loadMaChart() {
   placeholder.style.display = 'flex';
   chartMsg.textContent      = 'Loading price history…';
   chartStats.classList.add('hidden');
-  maShowCoverage(chartStats, null);
+  maShowCoverage(chartStats, '');
 
   try {
-    const data = await mapAssetsApi.getPriceHistory(name, days, 'day');
-    buildMaChart(data.candles);
+    const r = await fetch(`/api/upland/market/asset/${encodeURIComponent(asset.category)}/${encodeURIComponent(asset.token)}`,
+      { headers: { Authorization: `Bearer ${state.token}` } });
+    if (r.status === 401) { logout(); return; }
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.error || 'Failed to load price history');
+    if (asset !== maState.asset) return; // another asset was chosen meanwhile
+    const name = data.design.display_name || data.design.token_name;
+    if (!maSearch.value) maSearch.value = name;
+    const since = new Date(Date.now() - days * 86_400_000).toISOString().slice(0, 10);
+    buildMaChart(data.candles.filter(c => c.day >= since).map(c => ({ time: c.day, open: c.open, high: c.high, low: c.low, close: c.close })));
 
-    if (data.totalSales > 0) {
-      $('ma-stat-avg').textContent    = maFmtUpx(data.avg);
-      $('ma-stat-min').textContent    = maFmtUpx(data.min);
-      $('ma-stat-max').textContent    = maFmtUpx(data.max);
-      $('ma-stat-trades').textContent = data.totalSales;
+    const st = data.stats[days] || { trades: 0 };
+    const history = data.salesFrom ? `Sales history since ${new Date(data.salesFrom).toLocaleDateString(undefined, { dateStyle: 'medium' })}` : '';
+    const gifts = data.giveaways ? `; ${data.giveaways} giveaway sale${data.giveaways > 1 ? 's' : ''} at 1 UPX left out` : '';
+    if (st.trades > 0) {
+      $('ma-stat-avg').textContent    = maFmtUpx(st.avg);
+      $('ma-stat-min').textContent    = maFmtUpx(st.min);
+      $('ma-stat-max').textContent    = maFmtUpx(st.max);
+      $('ma-stat-trades').textContent = st.trades;
       chartStats.classList.remove('hidden');
-      maShowCoverage(chartStats, data.coverage);
+      maShowCoverage(chartStats, `${name}, last ${days} days. ${history}${gifts}.`);
     } else {
       placeholder.style.display = 'flex';
-      chartMsg.textContent      = `No priced sales found for "${name}". ${maCoverageText(data.coverage)}`;
+      chartMsg.textContent      = `No sales of "${name}" in the last ${days} days. ${history}.`;
     }
-  } catch {
+  } catch (err) {
     placeholder.style.display = 'flex';
-    chartMsg.textContent      = 'Failed to load price history';
+    chartMsg.textContent      = err.message || 'Failed to load price history';
   }
 }
-
-/* ── Map Assets: Load all data ───────────────────────────── */
-async function loadMapAssets() {
-  if (maState.loading) return;
-  maState.loading = true;
-
-  maMintsBody.innerHTML    = '<tr class="table-empty"><td colspan="5">Loading…</td></tr>';
-  maSalesBody.innerHTML    = '<tr class="table-empty"><td colspan="6">Loading…</td></tr>';
-  maListingsBody.innerHTML = '<tr class="table-empty"><td colspan="6">Loading…</td></tr>';
-
-  const category = maCategorySelect.value;
-  const limit    = maLimitSelect.value;
-
-  try {
-    const params = { limit };
-    if (category) params.category = category;
-
-    const [actData, lstData, ovData] = await Promise.all([
-      mapAssetsApi.getActivity(params),
-      mapAssetsApi.getListings(limit),
-      mapAssetsApi.getMarketOverview(),
-    ]);
-
-    renderMaOverview(ovData);
-    maState.avgPriceUpx = ovData.avgPriceUpx || null;
-
-    const events = actData.events || [];
-    renderMaEvents(events);
-    populateMaNftNames(events);
-    renderMaListings(lstData.listings || [], maState.avgPriceUpx);
-  } catch {
-    maMintsBody.innerHTML    = '<tr class="table-empty"><td colspan="5">Failed to load</td></tr>';
-    maSalesBody.innerHTML    = '<tr class="table-empty"><td colspan="6">Failed to load</td></tr>';
-    maListingsBody.innerHTML = '<tr class="table-empty"><td colspan="6">Failed to load</td></tr>';
-  } finally {
-    maState.loading = false;
-  }
-}
-
-/* ── Map Assets: Tab switching ───────────────────────────── */
-document.querySelectorAll('[data-ma-tab]').forEach(btn => {
-  btn.addEventListener('click', () => {
-    const tab = btn.dataset.maTab;
-    document.querySelectorAll('[data-ma-tab]').forEach(b => b.classList.toggle('active', b === btn));
-    document.querySelectorAll('.ma-tab-panel').forEach(p => p.classList.add('hidden'));
-    const panel = $(`ma-tab-${tab}`);
-    if (panel) panel.classList.remove('hidden');
-    maState.activeTab = tab;
-  });
-});
 
 /* ── Map Assets: Chart controls ─────────────────────────── */
-$('ma-nft-name').addEventListener('change', loadMaChart);
-$('ma-period').addEventListener('change',   loadMaChart);
-
-/* ── Map Assets: Filter change / refresh ─────────────────── */
-maCategorySelect.addEventListener('change', loadMapAssets);
-maLimitSelect.addEventListener('change', loadMapAssets);
-maRefreshBtn.addEventListener('click', () => { loadMapAssets(); if ($('ma-nft-name').value) loadMaChart(); });
-
-/* ── Map Assets: Load on nav ─────────────────────────────── */
-document.querySelector('.nav-item[data-section="map-assets"]').addEventListener('click', () => {
-  if (!maState.loaded) {
-    maState.loaded = true;
-    loadMapAssets();
-  }
-});
+$('ma-period').addEventListener('change', loadMaChart);
+$('map-assets-refresh').addEventListener('click', () => { if (maState.asset) loadMaChart(); });
 
 /* ── Collection Optimizer ───────────────────────────────── */
 const fmtUpx = n => (n == null ? '—' : `${Math.round(n).toLocaleString()} UPX`);
@@ -1484,49 +1429,78 @@ function renderCollectionPlan(data) {
 $('co-form').addEventListener('submit', runCollectionOptimizer);
 
 /* ── Floor Board ────────────────────────────────────────── */
+/* Three ways to choose cities: all of Upland, only the ticked ones, or all but
+   the ticked ones. The choice and the ticks are remembered in this browser. */
 const fbState = { citiesLoaded: false };
+const FB_HINTS = {
+  all: 'Showing all of Upland. Tick a city to narrow it down, or switch to "All except" to leave a few out.',
+  only: 'Tick the cities to include.',
+  except: 'Tick the cities to leave out; everything else is included.',
+};
+const fbStore = {
+  get(key, fallback) { try { return JSON.parse(localStorage.getItem(key)) ?? fallback; } catch { return fallback; } },
+  set(key, value) { try { localStorage.setItem(key, JSON.stringify(value)); } catch { /* storage off: just don't remember */ } },
+};
 
-function fbSelectedCities() {
-  if ($('fb-all').checked) return [];
-  return [...document.querySelectorAll('#fb-city-list input:checked')].map(i => i.value);
+function fbMode() { return $('fb-mode').value; }
+function fbTicked() { return [...document.querySelectorAll('#fb-city-list input:checked')].map(i => i.value); }
+
+function fbSync() {
+  const mode = fbMode();
+  $('fb-hint').textContent = FB_HINTS[mode];
+  $('fb-city-list').style.opacity = mode === 'all' ? '0.55' : '1';
+  fbStore.set('kfm_fb_mode', mode);
+  fbStore.set('kfm_fb_cities', fbTicked());
 }
 
 async function loadFloorCities() {
   const r = await fetch('/api/upland/floors/cities');
   const data = await r.json();
   if (!r.ok) throw new Error(data.error || 'Could not load cities');
+  const saved = new Set(fbStore.get('kfm_fb_cities', []).map(String));
   $('fb-city-list').innerHTML = data.cities.map(c => `
     <label style="display:flex;align-items:center;gap:0.4rem;cursor:pointer">
-      <input type="checkbox" value="${c.id}"> ${escHtml(c.name)}
+      <input type="checkbox" value="${c.id}"${saved.has(String(c.id)) ? ' checked' : ''}> ${escHtml(c.name)}
       <span style="color:var(--text-muted)">(${Number(c.listings).toLocaleString()})</span>
     </label>`).join('');
   document.querySelectorAll('#fb-city-list input').forEach(i => i.addEventListener('change', () => {
-    $('fb-all').checked = fbSelectedCities().length === 0 && !document.querySelector('#fb-city-list input:checked');
+    // Ticking a city while showing all of Upland means "just these".
+    if (fbMode() === 'all' && i.checked) $('fb-mode').value = 'only';
+    fbSync();
     loadFloors();
   }));
   fbState.citiesLoaded = true;
+  fbSync();
 }
 
+let fbLoadSeq = 0;
 async function loadFloors() {
+  const seq = ++fbLoadSeq;
   const errBox = $('fb-error');
   errBox.classList.add('hidden');
   try {
     if (!fbState.citiesLoaded) await loadFloorCities();
-    const cities = fbSelectedCities();
-    const r = await fetch(`/api/upland/floors?${new URLSearchParams({ top: '25', ...(cities.length ? { cities: cities.join(',') } : {}) })}`);
+    const mode = fbMode();
+    const ticked = mode === 'all' ? [] : fbTicked();
+    const params = new URLSearchParams({ top: '25' });
+    if (ticked.length) params.set(mode === 'only' ? 'cities' : 'exclude', ticked.join(','));
+    const r = await fetch(`/api/upland/floors?${params}`);
     const data = await r.json();
+    if (seq !== fbLoadSeq) return; // a newer choice already went out; don't overwrite it
     if (!r.ok) throw new Error(data.error || 'Could not load floors');
-    renderFloors(data, cities.length);
+    renderFloors(data, ticked.length ? { mode, count: ticked.length } : null);
   } catch (err) {
+    if (seq !== fbLoadSeq) return;
     errBox.textContent = err.message;
     errBox.classList.remove('hidden');
   }
 }
 
-function renderFloors(data, pickedCount) {
+function renderFloors(data, picked) {
   const when = iso => (iso ? new Date(iso).toLocaleString() : 'never');
+  const cities = n => `${n} ${n === 1 ? 'city' : 'cities'}`;
   $('fb-meta').textContent =
-    `${pickedCount ? `${pickedCount} ${pickedCount === 1 ? 'city' : 'cities'} selected` : 'All of Upland'}. ` +
+    `${!picked ? 'All of Upland' : picked.mode === 'only' ? `${cities(picked.count)} selected` : `All of Upland except ${cities(picked.count)}`}. ` +
     `Listing book: ${data.listings.toLocaleString()} live listings (snapshot ${when(data.snapshotAt)}; live changes applied up to ${when(data.changesAppliedTo)}). ` +
     `${data.unmappedListings.toLocaleString()} listings aren't in the property catalog yet, so their city is unknown.`;
 
@@ -1559,10 +1533,8 @@ function renderFloors(data, pickedCount) {
     : '<tr class="table-empty"><td colspan="7">No catalogued cities in this selection</td></tr>';
 }
 
-$('fb-all').addEventListener('change', () => {
-  if ($('fb-all').checked) document.querySelectorAll('#fb-city-list input').forEach(i => { i.checked = false; });
-  loadFloors();
-});
+$('fb-mode').value = ['all', 'only', 'except'].includes(fbStore.get('kfm_fb_mode', 'all')) ? fbStore.get('kfm_fb_mode', 'all') : 'all';
+$('fb-mode').addEventListener('change', () => { fbSync(); loadFloors(); });
 $('fb-refresh-btn').addEventListener('click', loadFloors);
 document.querySelector('.nav-item[data-section="floors"]').addEventListener('click', loadFloors);
 
@@ -1577,9 +1549,7 @@ if (new URLSearchParams(window.location.search).get('reset_token')) {
 
 loadCities().then(() => {
   if (state.cities) {
-    populateMarketCities(state.cities);
     populateBuildingCities(state.cities);
+    populateAppraiserCities(state.cities);
   }
 });
-loadPurchases();
-loadStructureTypes();

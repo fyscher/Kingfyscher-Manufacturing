@@ -1,190 +1,107 @@
 const structuresRouter = require("express").Router();
-const { uplandFetch } = require("../../utils/uplandClient");
-const { getActions } = require("../../utils/appchainClient");
+const { indexerDb } = require("../../utils/indexerDb");
 
-const PERIODS = [
-  { id: "24h", name: "Last 24 Hours",  hours: 24 },
-  { id: "7d",  name: "Last 7 Days",    hours: 24 * 7 },
-  { id: "30d", name: "Last 30 Days",   hours: 24 * 30 },
-];
+// Building Browser: which properties have a given building, from the indexer's
+// copy of the chain table that places each structure NFT on a property (a21;
+// see indexer/buildings.js). Upland's own POST /buildings search is broken
+// server-side, and the old address search here could never match a building.
+const NO_BUILDINGS = {
+  error: "Building data isn't available on this server: it needs the indexer database (run `npm run indexer -- buildings` and `-- nfts --add structure`).",
+};
+const buildingsDb = () => {
+  const db = indexerDb();
+  return db && db.prepare("SELECT 1 FROM sync_state WHERE feed = 'snapshot:buildings'").get() ? db : null;
+};
+const cityFilter = cityId => (Number.isInteger(cityId) && cityId > 0 ? cityId : null);
 
-// GET /api/upland/structures/types
-// Returns time-period options for the market filter
-// (Upland /buildings endpoint has a server-side SRID bug; /building-types returns 404)
-structuresRouter.get("/types", (_req, res) => {
-  res.json({ types: PERIODS.map(p => ({ id: p.id, name: p.name })) });
+// GET /api/upland/structures/building-types?cityId=  -> the dropdown: each building
+// with how many stand in the city (or everywhere), how many are on properties for
+// sale, and the cheapest UPX ask among those. Read from building_types, which the
+// indexer's tail rebuilds every 15 minutes.
+structuresRouter.get("/building-types", (req, res) => {
+  const db = buildingsDb();
+  if (!db) return res.status(503).json(NO_BUILDINGS);
+  const cityId = cityFilter(Number(req.query.cityId));
+  const types = db.prepare(`
+    SELECT token_name AS type, MIN(name) AS name, SUM(buildings) AS buildings, SUM(under_construction) AS underConstruction,
+      SUM(properties) AS properties, SUM(for_sale) AS forSale, MIN(cheapest_upx) AS cheapestUpx
+    FROM building_types ${cityId ? "WHERE city_id = @cityId" : ""}
+    GROUP BY token_name
+    ORDER BY name COLLATE NOCASE`).all(cityId ? { cityId } : {});
+  const mark = key => db.prepare("SELECT done_until FROM sync_state WHERE feed = ?").get(key)?.done_until ?? null;
+  res.json({ types, unidentified: Number(mark("buildings:unidentified") || 0), asOf: mark("buildings:refreshed") });
 });
 
-// GET /api/upland/structures/market?buildingTypeId=7d&cityId=1
-// Returns recent n5 property ownership notarizations from Appchain within the chosen
-// period (actual sale prices), enriched with address/city, optionally filtered by city.
-structuresRouter.get("/market", async (req, res) => {
-  const { buildingTypeId = "7d", cityId } = req.query;
-  const period = PERIODS.find(p => p.id === buildingTypeId) || PERIODS[1];
-  const after = new Date(Date.now() - period.hours * 3600 * 1000).toISOString();
-
-  const result = await getActions({
-    filter: "playuplandme:n5",
-    limit: 100,
-    sort: "desc",
-    after,
-  });
-
-  const raw = (result.actions || []).map(action => {
-    const data = action.act?.data || {};
-    const addrMatch = (data.memo || "").match(/owns (.+?) on Upland/);
-    return {
-      trxId:       action.trx_id,
-      propertyId:  String(data.a45 || ""),
-      buyerEos:    data.p14 || "",
-      priceUpx:    parseFloat((data.p24 || "0 UPX").split(" ")[0]) || 0,
-      purchasedAt: action["@timestamp"] || action.timestamp,
-      address:     addrMatch ? addrMatch[1] : null,
-    };
-  });
-
-  // Enrich up to 20 unique properties with address/city
-  const seen = new Set();
-  const toEnrich = [];
-  for (const p of raw) {
-    if (p.propertyId && !seen.has(p.propertyId)) {
-      seen.add(p.propertyId);
-      toEnrich.push(p.propertyId);
-      if (toEnrich.length >= 20) break;
-    }
-  }
-
-  const propMap = {};
-  await Promise.all(
-    toEnrich.map(async id => {
-      try {
-        propMap[id] = await uplandFetch(`/properties/${id}`);
-      } catch { /* skip — property detail is optional */ }
-    })
-  );
-
-  let listings = raw.map(p => {
-    const prop = propMap[p.propertyId];
-    return {
-      ...p,
-      type:         { name: "Property" },
-      city:         prop?.city         || null,
-      owner:        p.buyerEos,
-      price:        p.priceUpx,
-      address:      p.address || prop?.address || null,
-      neighborhood: prop?.neighborhood || null,
-    };
-  });
-
-  if (cityId) {
-    listings = listings.filter(l => String(l.city?.id) === String(cityId));
-  }
-
-  listings.sort((a, b) => a.price - b.price);
-
-  res.json({
-    floor:    listings.length > 0 ? listings[0].price : null,
-    count:    listings.length,
-    total:    result.total?.value ?? listings.length,
-    listings,
-  });
+// GET /api/upland/structures/buildings?type=smltownhouse&cityId=1&forSale=1&single=1  -> the
+// properties with that building, the ones for sale first (cheapest UPX ask first).
+// single=1 keeps to properties where it's the only building: a parcel holding 20
+// buildings is listed at the parcel's price, not one building's. Buildings still
+// under construction are left out unless unfinished=1 (then flagged, with the
+// expected finish). Index lookups on each building's own type and city (see
+// indexer enrichBuildings).
+structuresRouter.get("/buildings", (req, res) => {
+  const db = buildingsDb();
+  if (!db) return res.status(503).json(NO_BUILDINGS);
+  const type = String(req.query.type || "");
+  if (!type) return res.status(400).json({ error: "Pick a building" });
+  const cityId = cityFilter(Number(req.query.cityId));
+  const where = `WHERE b.token_name = @type
+      ${cityId ? "AND b.city_id = @cityId" : ""}
+      ${req.query.forSale === "1" ? "AND l.property_id IS NOT NULL" : ""}
+      ${req.query.single === "1" ? "AND b.on_property <= 1" : ""}
+      ${req.query.unfinished === "1" ? "" : "AND b.under_construction = 0"}`;
+  const args = cityId ? { type, cityId } : { type };
+  // A parcel with two of the same building appears once.
+  const properties = db.prepare(`
+    SELECT b.property_id AS id, p.address, p.city_name AS city, p.neighborhood_name AS neighborhood,
+      p.mint_price AS mintPrice, l.price_upx AS priceUpx, l.price_fiat AS priceUsd, MAX(b.on_property) AS buildingsOnProperty,
+      MAX(b.under_construction) AS underConstruction, MIN(k.eta) AS finishesAround
+    FROM property_buildings b
+    LEFT JOIN properties p ON p.id = b.property_id
+    LEFT JOIN listings_current l ON l.property_id = b.property_id
+    LEFT JOIN constructions k ON k.nft_id = b.nft_id
+    ${where}
+    GROUP BY b.property_id
+    ORDER BY l.property_id IS NULL, NULLIF(l.price_upx, 0) IS NULL, l.price_upx, l.price_fiat, p.address
+    LIMIT 1000`).all(args);
+  const total = db.prepare(`SELECT COUNT(DISTINCT b.property_id) AS n FROM property_buildings b
+    LEFT JOIN listings_current l ON l.property_id = b.property_id ${where}`).get(args).n;
+  res.json({ type, properties, total });
 });
 
-// GET /api/upland/structures/sales-history?limit=20
-// Returns recent property ownership changes from Appchain (n5 notarization actions)
-structuresRouter.get("/sales-history", async (req, res) => {
-  const { limit = 20, before, after } = req.query;
-  try {
-    const result = await getActions({
-      filter: "playuplandme:n5",
-      limit:  Math.min(Number(limit), 100),
-      sort:   "desc",
-      before,
-      after,
-    });
-    const sales = (result.actions || []).map(action => {
-      const data = action.act?.data || {};
-      const addrMatch = (data.memo || "").match(/owns (.+?) on Upland/);
-      return {
-        trxId:       action.trx_id,
-        blockNum:    action.block_num,
-        timestamp:   action["@timestamp"] || action.timestamp,
-        priceUpx:    parseFloat((data.p24 || "0 UPX").split(" ")[0]) || null,
-        propertyId:  String(data.a45 || ""),
-        buyerEos:    data.p14 || "",
-        address:     addrMatch ? addrMatch[1] : null,
-      };
-    });
-    res.json({ total: result.total?.value ?? sales.length, sales });
-  } catch (err) {
-    res.json({ total: 0, sales: [], error: err.message });
-  }
-});
-
-// GET /api/upland/structures/building-search?cityId=&address=
-// Searches Upland properties by address, then enriches each result with the most
-// recent n5 on-chain sale price by scanning recent chain history.
-structuresRouter.get("/building-search", async (req, res) => {
-  const { cityId, address } = req.query;
-  if (!address || !address.trim()) return res.json({ properties: [] });
-
-  const params = new URLSearchParams({ currentPage: 1, pageSize: 50 });
-  if (cityId) params.set("cityId", cityId);
-  params.set("textSearch", address.trim());
-
-  let properties = [];
-  try {
-    const propData = await uplandFetch(`/properties?${params}`);
-    properties = propData.results || [];
-  } catch {
-    return res.json({ properties: [] });
-  }
-
-  if (properties.length === 0) return res.json({ properties: [] });
-
-  const propertyIds = new Set(properties.map(p => String(p.id)));
-  const salesMap = {};
-
-  // Scan recent n5 actions in batches to build a last-sale map for the matched IDs
-  let before;
-  for (let batch = 0; batch < 5; batch++) {
-    let result;
-    try {
-      result = await getActions({ filter: "playuplandme:n5", limit: 100, sort: "desc", before });
-    } catch { break; }
-
-    const actions = result.actions || [];
-    if (actions.length === 0) break;
-
-    for (const action of actions) {
-      const data = action.act?.data || {};
-      const pid = String(data.a45 || "");
-      if (propertyIds.has(pid) && !salesMap[pid]) {
-        const addrMatch = (data.memo || "").match(/owns (.+?) on Upland/);
-        salesMap[pid] = {
-          priceUpx:  parseFloat((data.p24 || "0 UPX").split(" ")[0]) || null,
-          timestamp: action["@timestamp"] || action.timestamp,
-          buyerEos:  data.p14 || "",
-          address:   addrMatch ? addrMatch[1] : null,
-        };
-      }
-    }
-
-    if (Object.keys(salesMap).length >= propertyIds.size) break;
-    before = actions[actions.length - 1]?.["@timestamp"];
-  }
-
-  const enriched = properties.map(p => ({
-    id:           p.id,
-    address:      p.address,
-    city:         p.city,
-    neighborhood: p.neighborhood,
-    status:       p.status,
-    currentPrice: p.mintPrice || null,
-    lastSale:     salesMap[String(p.id)] || null,
-  }));
-
-  res.json({ properties: enriched });
+// GET /api/upland/structures/building-sales?type=smltownhouse&limit=10  -> the latest
+// property sales, across every city, that say what this building sells for: the
+// property's only building is this one, and the sale came after it was built
+// (from its BUILD payment; none means it predates the stored history). Sales of
+// multi-building parcels are counted and left out, and so are 1-UPX "sales"
+// (transfers between a player's own accounts). Plus what's listed now, to compare.
+structuresRouter.get("/building-sales", (req, res) => {
+  const db = buildingsDb();
+  if (!db) return res.status(503).json(NO_BUILDINGS);
+  const type = String(req.query.type || "");
+  if (!type) return res.status(400).json({ error: "Pick a building" });
+  const limit = Math.min(Math.max(Number.parseInt(req.query.limit, 10) || 10, 1), 50);
+  const sales = db.prepare(`
+    SELECT s.ts, s.price, s.kind, b.property_id AS id, COALESCE(p.address, s.address) AS address,
+      p.city_name AS city, p.neighborhood_name AS neighborhood
+    FROM property_buildings b
+    CROSS JOIN property_sales s ON s.property_id = b.property_id
+    LEFT JOIN properties p ON p.id = b.property_id
+    WHERE b.token_name = @type AND b.on_property = 1 AND b.under_construction = 0
+      AND (b.built_at IS NULL OR s.ts >= b.built_at)
+      AND s.price > CASE s.kind WHEN 'upx' THEN 1 ELSE 0 END
+    ORDER BY s.ts DESC
+    LIMIT @limit`).all({ type, limit });
+  const leftOut = db.prepare(`SELECT
+      COUNT(DISTINCT CASE WHEN b.on_property > 1 THEN s.global_sequence END) AS parcels,
+      COUNT(DISTINCT CASE WHEN b.on_property = 1 AND b.under_construction = 0 AND s.ts < b.built_at THEN s.global_sequence END) AS beforeBuilt,
+      COUNT(DISTINCT CASE WHEN b.under_construction = 1 THEN s.global_sequence END) AS unfinished
+    FROM property_buildings b CROSS JOIN property_sales s ON s.property_id = b.property_id
+    WHERE b.token_name = @type AND s.price > CASE s.kind WHEN 'upx' THEN 1 ELSE 0 END`).get({ type });
+  const listed = db.prepare(`SELECT SUM(for_sale) AS forSale, MIN(cheapest_upx) AS cheapestUpx
+    FROM building_types WHERE token_name = @type`).get({ type });
+  const history = db.prepare("SELECT MIN(ts) AS since FROM property_sales").get();
+  res.json({ type, sales, leftOut, listedNow: { forSale: listed.forSale || 0, cheapestUpx: listed.cheapestUpx ?? null }, salesSince: history.since });
 });
 
 module.exports = structuresRouter;

@@ -72,6 +72,97 @@ CREATE INDEX IF NOT EXISTS properties_city ON properties (city_id);
 -- Listed properties the Developers API couldn't place, so lookups aren't repeated.
 CREATE TABLE IF NOT EXISTS properties_missing (id TEXT PRIMARY KEY, checked_at TEXT NOT NULL);
 
+-- NFTs of the tracked categories (snapshot of uplandnftact.dgood), kept
+-- current from escrow moves. in_escrow = held by playuplandme (listed, or held).
+CREATE TABLE IF NOT EXISTS nft_items (
+  id INTEGER PRIMARY KEY, category TEXT NOT NULL, token_name TEXT NOT NULL, serial INTEGER, in_escrow INTEGER NOT NULL
+);
+
+-- Every NFT move into or out of escrow: listing, delist, sale, or other.
+CREATE TABLE IF NOT EXISTS nft_escrow_events (
+  id TEXT PRIMARY KEY, global_sequence TEXT NOT NULL, ts TEXT NOT NULL, block_num INTEGER NOT NULL,
+  dgood_id INTEGER NOT NULL, direction TEXT NOT NULL, account TEXT, kind TEXT NOT NULL
+);
+
+-- One row per design for the map asset browser, rebuilt by refreshMarket.
+CREATE TABLE IF NOT EXISTS market_designs (
+  category TEXT NOT NULL, token_name TEXT NOT NULL, display_name TEXT, issued INTEGER, max_supply INTEGER, base_uri TEXT,
+  escrow INTEGER NOT NULL, listed INTEGER NOT NULL, last_price REAL, last_sale_at TEXT,
+  sales_7d INTEGER NOT NULL, sales_30d INTEGER NOT NULL, median_30d REAL, low_30d REAL, high_30d REAL,
+  refreshed_at TEXT NOT NULL,
+  PRIMARY KEY (category, token_name)
+);
+
+-- Which building stands on which property (playuplandme table a21; buildings.js).
+CREATE TABLE IF NOT EXISTS property_buildings (
+  nft_id INTEGER PRIMARY KEY, property_id TEXT NOT NULL, f54 INTEGER, f55 INTEGER, updated_at TEXT NOT NULL
+);
+
+-- Buildings still under construction (playuplandme table a23): the row leaves
+-- when the building is finished (or the build is cancelled). Verified on 131
+-- Franklin St, San Francisco: its Coffee Shop is placed (a21) from the start of
+-- construction, but isn't finished until ~2026-12-23.
+CREATE TABLE IF NOT EXISTS constructions (
+  nft_id INTEGER PRIMARY KEY, started_at TEXT, eta TEXT, progress REAL, needed REAL, updated_at TEXT NOT NULL
+);
+
+-- When each building went up: the BUILD payment that started it (appchain era only;
+-- a building with no row here predates the stored history).
+CREATE TABLE IF NOT EXISTS building_builds (
+  nft_id INTEGER PRIMARY KEY, property_id TEXT NOT NULL, city_id INTEGER, ts TEXT NOT NULL, account TEXT
+);
+
+-- The Building Browser's dropdown, rebuilt by refreshBuildingTypes (city_id 0 = not catalogued).
+CREATE TABLE IF NOT EXISTS building_types (
+  city_id INTEGER NOT NULL, token_name TEXT NOT NULL, name TEXT NOT NULL, buildings INTEGER NOT NULL,
+  for_sale INTEGER NOT NULL, cheapest_upx REAL, refreshed_at TEXT NOT NULL,
+  PRIMARY KEY (city_id, token_name)
+);
+
+-- Where each design's picture lives. No source yet: the design metadata on IPFS
+-- has no hosts (checked 2026-11-03), and the art's URLs on static.upland.me can't
+-- be derived. The browser shows pictures as soon as rows exist.
+CREATE TABLE IF NOT EXISTS design_images (
+  category TEXT NOT NULL, token_name TEXT NOT NULL, image_url TEXT, fetched_at TEXT NOT NULL,
+  PRIMARY KEY (category, token_name)
+);
+
+-- Neighborhood boundaries and which ones border each other (neighborhoods.js).
+CREATE TABLE IF NOT EXISTS neighborhoods (
+  id INTEGER PRIMARY KEY, city_id INTEGER, name TEXT, area REAL, center_lon REAL, center_lat REAL,
+  boundaries TEXT, updated_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS neighborhood_adjacency (a INTEGER NOT NULL, b INTEGER NOT NULL, PRIMARY KEY (a, b));
+
+-- NFTs handed to the buyer inside a property sale's transaction: what was placed
+-- on the property (decor, ornaments, vehicles) and the building NFTs themselves.
+CREATE TABLE IF NOT EXISTS property_sale_nfts (sale_seq TEXT NOT NULL, dgood_id INTEGER NOT NULL, PRIMARY KEY (sale_seq, dgood_id));
+
+-- The appraiser's view of every property sale (appraisal.js): what stood on the
+-- property then, and how many NFTs came with it (NULL = before the stored NFT history).
+CREATE TABLE IF NOT EXISTS appraisal_sales (
+  global_sequence TEXT PRIMARY KEY, property_id TEXT NOT NULL, ts TEXT NOT NULL, price REAL, currency TEXT,
+  mint REAL, city_id INTEGER, neighborhood_id INTEGER, buildings INTEGER NOT NULL, token_name TEXT, nfts INTEGER
+);
+
+-- Per building type: what buyers pay for it over the land, and what it takes to build (appraisal.js).
+CREATE TABLE IF NOT EXISTS building_values (
+  token_name TEXT PRIMARY KEY, name TEXT, sales INTEGER NOT NULL, p25 REAL, median REAL, p75 REAL,
+  ci_low REAL, ci_high REAL, pairs INTEGER NOT NULL, pair_median REAL,
+  hours_needed REAL, min_stake REAL, max_stake REAL, builds_90d INTEGER NOT NULL, contracts_90d INTEGER NOT NULL,
+  refreshed_at TEXT NOT NULL
+);
+
+-- Construction contracts taken (feed contracts, action n151) and what the builder was paid
+-- up front, read from each contract's transaction (contracts.js). price = builder + 5% fee.
+CREATE TABLE IF NOT EXISTS construction_contracts (
+  global_sequence TEXT PRIMARY KEY, trx_id TEXT NOT NULL, ts TEXT NOT NULL, nft_id INTEGER,
+  builder TEXT, price REAL, fee REAL, fetched_at TEXT NOT NULL
+);
+
+-- Figures the appraiser shows next to its numbers (back-test, USD rate, decor effect), as JSON.
+CREATE TABLE IF NOT EXISTS appraisal_stats (key TEXT PRIMARY KEY, value TEXT NOT NULL, refreshed_at TEXT NOT NULL);
+
 CREATE TABLE IF NOT EXISTS sync_state (
   feed TEXT PRIMARY KEY, done_until TEXT NOT NULL, updated_at TEXT NOT NULL
 );
@@ -80,12 +171,42 @@ CREATE TABLE IF NOT EXISTS sync_state (
 // Columns added after a table first shipped; created on older databases at open.
 const ADDED_COLUMNS = {
   listings_current: { address: "TEXT", city_id: "INTEGER", city_name: "TEXT", neighborhood_name: "TEXT", mint_price: "REAL" },
+  designs: { base_uri: "TEXT" },
+  // Which design a sale was, from nft_items (enrichSales); '' = not a tracked category.
+  nft_sales: { dg_category: "TEXT", dg_token: "TEXT" },
+  // The cheapest a design sold for in 30 days with gifts left out, and its picture.
+  market_designs: { floor_30d: "REAL", image_url: "TEXT" },
+  // Each building's type and city, copied in by enrichBuildings, so the Building
+  // Browser filters by index instead of a lookup per building (that took up to
+  // 125 s on a busy disk, and better-sqlite3 blocks the whole app meanwhile).
+  property_buildings: { token_name: "TEXT", city_id: "INTEGER", on_property: "INTEGER", built_at: "TEXT", under_construction: "INTEGER" },
+  // Properties (not buildings) for sale, the cheapest single-building ask, and unfinished ones.
+  building_types: { properties: "INTEGER", under_construction: "INTEGER" },
+  // The listed property an NFT went into escrow with (kind 'bundle'; tagBundles).
+  nft_escrow_events: { property_id: "TEXT" },
+  // Contracts taken for this building type in 90 days, and their median price (appraisal.js).
+  building_values: { contract_n: "INTEGER", contract_median: "REAL" },
 };
 
 const INDEXES = `
 CREATE INDEX IF NOT EXISTS listings_city_upx ON listings_current (city_id, price_upx);
 CREATE INDEX IF NOT EXISTS listings_upx ON listings_current (price_upx);
 CREATE INDEX IF NOT EXISTS listings_city_usd ON listings_current (city_id, price_fiat);
+CREATE INDEX IF NOT EXISTS nft_items_escrow ON nft_items (category, token_name) WHERE in_escrow = 1;
+CREATE INDEX IF NOT EXISTS nft_items_structure ON nft_items (token_name) WHERE category = 'structure';
+CREATE INDEX IF NOT EXISTS property_buildings_property ON property_buildings (property_id);
+CREATE INDEX IF NOT EXISTS property_buildings_type ON property_buildings (token_name, city_id);
+CREATE INDEX IF NOT EXISTS escrow_events_dgood ON nft_escrow_events (dgood_id, block_num);
+CREATE INDEX IF NOT EXISTS escrow_events_ts ON nft_escrow_events (ts);
+CREATE INDEX IF NOT EXISTS escrow_events_property ON nft_escrow_events (property_id) WHERE property_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS listing_events_block ON property_listing_events (block_num, seller);
+CREATE INDEX IF NOT EXISTS appraisal_sales_nbhd ON appraisal_sales (neighborhood_id, ts);
+CREATE INDEX IF NOT EXISTS appraisal_sales_city ON appraisal_sales (city_id, ts);
+CREATE INDEX IF NOT EXISTS appraisal_sales_prop ON appraisal_sales (property_id, ts);
+CREATE INDEX IF NOT EXISTS properties_address ON properties (address);
+CREATE INDEX IF NOT EXISTS contracts_ts ON construction_contracts (ts);
+CREATE INDEX IF NOT EXISTS nft_sales_design ON nft_sales (dg_category, dg_token, ts);
+CREATE INDEX IF NOT EXISTS nft_sales_ts ON nft_sales (ts);
 `;
 
 function openDb(file) {
@@ -165,7 +286,7 @@ function setCheckpoint(db, feed, doneUntil) {
 
 function stats(db) {
   const tables = ["raw_actions", "raw_deltas", "nft_sales", "property_sales", "property_listing_events",
-    "property_offer_events", "designs", "design_names"];
+    "property_offer_events", "designs", "design_names", "nft_items", "nft_escrow_events", "market_designs", "property_buildings"];
   const counts = Object.fromEntries(tables.map(t => [t, db.prepare(`SELECT COUNT(*) AS n FROM ${t}`).get().n]));
   const checkpoints = db.prepare("SELECT feed, done_until FROM sync_state ORDER BY feed").all();
   return { counts, checkpoints };

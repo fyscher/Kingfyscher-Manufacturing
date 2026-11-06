@@ -40,6 +40,7 @@ async function syncDesigns({ db, client, log = () => {} }) {
         max_supply: units(r.max_supply),
         issued_supply: units(r.issued_supply),
         current_supply: units(r.current_supply),
+        base_uri: r.base_uri || null, // IPFS metadata link (the design's art and model)
         updated_at: updatedAt,
       })),
     );

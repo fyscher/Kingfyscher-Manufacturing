@@ -123,6 +123,11 @@ describe("GET /api/upland/floors", () => {
     assert.deepStrictEqual(all.body.cheapest.map(l => l.priceUpx), [900, 1000]);
     const picked = await api.get("/api/upland/floors?cities=3").expect(200);
     assert.deepStrictEqual(picked.body.cities.map(c => c.cityName), ["Manhattan"]);
+    const except = await api.get("/api/upland/floors?exclude=12&top=5").expect(200);
+    assert.deepStrictEqual(except.body.cities.map(c => c.cityName), ["Manhattan"], "all of Upland except Santa Clara");
+    assert.deepStrictEqual(except.body.cheapest.map(l => l.priceUpx), [3000, 4000], "and its cheapest list leaves Santa Clara out");
+    const both = await api.get("/api/upland/floors?cities=12&exclude=12").expect(200);
+    assert.deepStrictEqual(both.body.cities.map(c => c.cityName), ["Santa Clara"], "a pick list wins over an exclude list");
     const cities = await api.get("/api/upland/floors/cities").expect(200);
     assert.deepStrictEqual(cities.body.cities.map(c => [c.name, c.listings]), [["Manhattan", 2], ["Santa Clara", 5]]);
   });
