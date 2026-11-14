@@ -203,8 +203,8 @@ describe("appraisal: what's on the property, and the property's own price", () =
     const sale = db.prepare("INSERT INTO nft_sales (global_sequence, trx_id, ts, block_num, price, dg_category, dg_token) VALUES (?, ?, ?, 1, ?, ?, ?)");
     sale.run("b1", "tb1", day(2), 200, "outdoordecor", "bench");
     sale.run("b2", "tb2", day(1), 1, "outdoordecor", "bench"); // a 1-UPX gift
-    // The newest lamp sale (10) is under a quarter of the median (85): a gift too, so its last sale is the 80.
-    [[3, 80], [4, 90], [5, 100], [1, 10]].forEach(([d, p], i) => sale.run(`l${i}`, `tl${i}`, day(d), p, "outdoordecor", "lamp"));
+    // Lamp median 90: the newest sale (5,000) is over 4x it, a one-off trade; the next (10) is under a quarter, a gift; so its last sale is the 80.
+    [[3, 80], [4, 90], [5, 100], [1, 10], [0.5, 5000]].forEach(([d, p], i) => sale.run(`l${i}`, `tl${i}`, day(d), p, "outdoordecor", "lamp"));
     return db;
   }
   const escrow = (db, id, block, nft, kind, direction, propertyId = null) =>

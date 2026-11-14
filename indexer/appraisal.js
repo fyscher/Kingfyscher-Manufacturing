@@ -382,17 +382,24 @@ function fillSaleBundles(db, { log = () => {} } = {}) {
 
 const NOT_MAP_ASSETS = new Set(["structure"]); // a building's own NFT is the building
 
+// A sale over 4x the median is a one-off trade, not a price: UPX moved between
+// players dressed up as a sale (2026-11-14: a picket fence corner that sells for
+// 12 to 150 UPX "sold" for 76,500, serial 4609; Rolling Stone 142,000 against a
+// steady 200). The mirror image of a gift.
+const OVERPAY_MULTIPLE = 4;
+
 /**
  * The newest real sale of one map asset design, at the seller's price. A 1-UPX
  * sale is a gift, and so is one under a quarter of the median once there are 3
- * real sales (the same rule as the map asset browser, nfts.js).
+ * real sales (the same rule as the map asset browser, nfts.js); one over 4x the
+ * median is skipped the same way.
  */
 function designLastSale(db, category, token) {
   const d = db.prepare("SELECT display_name FROM market_designs WHERE category = ? AND token_name = ?").get(category, token);
   const all = db.prepare("SELECT ts, price FROM nft_sales WHERE dg_category = ? AND dg_token = ? AND price > ? ORDER BY ts DESC LIMIT 1000")
     .all(category, token, TOKEN_PRICE);
   const ref = all.length >= 3 ? quantile(sortNum(all.map(s => s.price)), 0.5) : null;
-  const last = all.find(s => ref == null || s.price >= ref * GIFT_SHARE) || null;
+  const last = all.find(s => ref == null || (s.price >= ref * GIFT_SHARE && s.price <= ref * OVERPAY_MULTIPLE)) || null;
   return { name: d?.display_name || token, lastPrice: last?.price ?? null, lastSaleAt: last?.ts ?? null };
 }
 

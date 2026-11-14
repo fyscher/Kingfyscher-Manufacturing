@@ -844,7 +844,7 @@ function apPlacedNote(d) {
     p && p.moved ? `${plural(p.moved, 'item')} from that listing ${one ? 'has' : 'have'} since been sold or listed on ${one ? 'its' : 'their'} own, so ${one ? "it's" : "they're"} left out.` : null,
     d.assets.some(a => a.inSalePrice) ? 'Map assets that came with its last sale are shown, not added: the sale price already paid for them.' : null,
     d.untrackedNfts ? `${plural(d.untrackedNfts, 'other NFT')} on it ${d.untrackedNfts === 1 ? "isn't a map asset" : "aren't map assets"} we track.` : null,
-    'Each price is the newest real sale of that design (1-UPX gifts skipped).',
+    'Each price is the newest real sale of that design: gifts (1 UPX, or under a quarter of its usual price) and one-off trades over 4x its usual price are skipped.',
   ].filter(Boolean).join(' ');
 }
 
