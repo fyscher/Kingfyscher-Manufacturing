@@ -578,7 +578,7 @@
         <div class="page-header">
           <div>
             <h2 class="page-title">Property Appraiser</h2>
-            <p class="page-subtitle">Land + each building + the map assets on it, each from its own sales, with ranges</p>
+            <p class="page-subtitle">The property's last sale plus the last sale of each map asset on it. Buildings are noted, not priced.</p>
           </div>
         </div>
 
@@ -608,33 +608,11 @@
           </div>
 
           <div class="stats-grid" style="margin-bottom:1.25rem">
-            <div class="stat-card"><div class="stat-content"><span class="stat-label">Property (land + buildings)</span><span class="stat-value" id="ap-stat-total">—</span><span class="stat-label" id="ap-stat-total-range"></span></div></div>
-            <div class="stat-card"><div class="stat-content"><span class="stat-label">Land</span><span class="stat-value" id="ap-stat-land">—</span><span class="stat-label" id="ap-stat-land-range"></span></div></div>
-            <div class="stat-card"><div class="stat-content"><span class="stat-label">Buildings</span><span class="stat-value" id="ap-stat-buildings">—</span><span class="stat-label" id="ap-stat-buildings-note"></span></div></div>
-            <div class="stat-card"><div class="stat-content"><span class="stat-label">Map assets (resale value)</span><span class="stat-value" id="ap-stat-assets">—</span><span class="stat-label" id="ap-stat-with-assets"></span></div></div>
-            <div class="stat-card"><div class="stat-content"><span class="stat-label">Asking price now</span><span class="stat-value" id="ap-stat-ask">—</span><span class="stat-label" id="ap-stat-ask-note"></span></div></div>
-          </div>
-
-          <div class="card" style="margin-bottom:1.25rem">
-            <div class="card-header"><h3 class="card-title">Land: comparable bare-land sales</h3><span class="badge" id="ap-comps-count">0</span></div>
-            <div class="card-body"><p id="ap-land-note" style="font-size:0.8rem;color:var(--text-muted)"></p></div>
-            <div class="card-body card-body--flush">
-              <table class="table">
-                <thead><tr><th>Sold</th><th>Address</th><th>Where</th><th class="num">Price</th><th class="num">Mint</th><th class="num">x Mint</th></tr></thead>
-                <tbody id="ap-comps-body"></tbody>
-              </table>
-            </div>
-          </div>
-
-          <div class="card" style="margin-bottom:1.25rem">
-            <div class="card-header"><h3 class="card-title">Buildings</h3><span class="badge" id="ap-buildings-count">0</span></div>
-            <div class="card-body"><p id="ap-buildings-note" style="font-size:0.8rem;color:var(--text-muted)"></p></div>
-            <div class="card-body card-body--flush">
-              <table class="table">
-                <thead><tr><th>Building</th><th>Status</th><th class="num">Buyers pay over land</th><th class="num">Typical range</th><th>Based on</th></tr></thead>
-                <tbody id="ap-buildings-body"></tbody>
-              </table>
-            </div>
+            <div class="stat-card"><div class="stat-content"><span class="stat-label">Total</span><span class="stat-value" id="ap-stat-total">-</span><span class="stat-label" id="ap-stat-total-note"></span></div></div>
+            <div class="stat-card"><div class="stat-content"><span class="stat-label">Property's last sale</span><span class="stat-value" id="ap-stat-sale">-</span><span class="stat-label" id="ap-stat-sale-note"></span></div></div>
+            <div class="stat-card"><div class="stat-content"><span class="stat-label">Map assets (last sales)</span><span class="stat-value" id="ap-stat-assets">-</span><span class="stat-label" id="ap-stat-assets-note"></span></div></div>
+            <div class="stat-card"><div class="stat-content"><span class="stat-label">Buildings</span><span class="stat-value" id="ap-stat-buildings">-</span><span class="stat-label" id="ap-stat-buildings-note"></span></div></div>
+            <div class="stat-card"><div class="stat-content"><span class="stat-label">Asking price now</span><span class="stat-value" id="ap-stat-ask">-</span><span class="stat-label" id="ap-stat-ask-note"></span></div></div>
           </div>
 
           <div class="card card--overflow" style="margin-bottom:1.25rem">
@@ -649,13 +627,24 @@
             </div>
             <div class="card-body card-body--flush">
               <table class="table">
-                <thead><tr><th>Map asset</th><th>Where we know it from</th><th class="num">How many</th><th class="num">Value each</th><th class="num">Total</th><th>Based on</th><th></th></tr></thead>
+                <thead><tr><th>Map asset</th><th>Where we know it from</th><th class="num">How many</th><th class="num">Last sale</th><th>Sold on</th><th class="num">Total</th><th></th></tr></thead>
                 <tbody id="ap-assets-body"></tbody>
               </table>
             </div>
           </div>
 
           <div class="card" style="margin-bottom:1.25rem">
+            <div class="card-header"><h3 class="card-title">Buildings</h3><span class="badge" id="ap-buildings-count">0</span></div>
+            <div class="card-body"><p id="ap-buildings-note" style="font-size:0.8rem;color:var(--text-muted)"></p></div>
+            <div class="card-body card-body--flush">
+              <table class="table">
+                <thead><tr><th>Building</th><th>Status</th><th>Construction started</th><th>At the last sale</th></tr></thead>
+                <tbody id="ap-buildings-body"></tbody>
+              </table>
+            </div>
+          </div>
+
+          <div class="card">
             <div class="card-header"><h3 class="card-title">This property's sales</h3><span class="badge" id="ap-history-count">0</span></div>
             <div class="card-body card-body--flush">
               <table class="table">
@@ -663,11 +652,6 @@
                 <tbody id="ap-history-body"></tbody>
               </table>
             </div>
-          </div>
-
-          <div class="card">
-            <div class="card-header"><h3 class="card-title">How far to trust this</h3></div>
-            <div class="card-body"><div id="ap-method" style="font-size:0.8rem;color:var(--text-muted);line-height:1.6"></div></div>
           </div>
         </div>
       </section>

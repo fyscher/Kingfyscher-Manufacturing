@@ -139,12 +139,13 @@ describe("GET /api/upland/appraiser", () => {
     assert.deepStrictEqual(await ids("q=131&cityId=2"), []);
   });
 
-  test("one property: listing bundle and the user's picks priced from resales", async () => {
+  test("one property: never sold, so its mint, plus the listing bundle and the user's picks at their last sale", async () => {
     const r = await get("/api/upland/appraiser/property/131000000001?picks=outdoordecor/bench*2,bad").expect(200);
     assert.strictEqual(r.body.property.address, "131 FRANKLIN ST");
-    assert.strictEqual(r.body.land, null, "no comparable sales here");
-    assert.deepStrictEqual(r.body.assets.map(a => [a.name, a.source, a.count, a.value]),
+    assert.deepStrictEqual(r.body.lastSale, { source: "mint", ts: null, price: 8000, currency: "UPX", upx: 8000 });
+    assert.deepStrictEqual(r.body.assets.map(a => [a.name, a.source, a.count, a.lastPrice]),
       [["Park Bench", "listing", 1, 120], ["Park Bench", "added by you", 2, 120]]);
+    assert.deepStrictEqual(r.body.totals, { property: 8000, assets: 360, unpriced: 0, total: 8360 });
     assert.deepStrictEqual(r.body.listing, { upx: 25000, usd: null, usdInUpx: null, asOf: "x" });
     await get("/api/upland/appraiser/property/999").expect(404);
     await get("/api/upland/appraiser/property/abc").expect(400);

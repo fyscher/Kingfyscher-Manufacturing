@@ -123,7 +123,7 @@ describe("land", () => {
 });
 
 describe("appraisal", () => {
-  test("land + building + map assets, with the listing's bundle counted and the last sale's shown", () => {
+  test("the refresh values building types for the calculator; the appraisal is last sales, buildings noted", () => {
     const db = openDb(":memory:");
     const now = Date.parse("2026-11-03T00:00:00Z");
     const day = n => new Date(now - n * 86_400_000).toISOString();
@@ -172,15 +172,86 @@ describe("appraisal", () => {
       ["Tiny House", 6, 2000, 1500000, 50, 72000, 4, 3, 3, 450]);
     assert.deepStrictEqual(r.contracts, { n: 3, p25: 250, p50: 300, p75: 350 }, "UPX per million Sparklet-hours");
 
-    const a = appraiseProperty(db, "P", { picks: [{ category: "outdoordecor", token: "lamp", count: 2 }], now });
-    assert.strictEqual(a.land.value, 1500);
-    assert.strictEqual(a.land.scope, "this neighborhood and the ones bordering it");
-    assert.deepStrictEqual(a.buildings.map(b => [b.name, b.value, b.toBuild]), [["Tiny House", 2000, { value: 450, basis: "contracts", n: 3 }]]);
-    assert.deepStrictEqual(a.assets.map(x => [x.token, x.source, x.value, x.count]),
-      [["bench", "listing", 120, 1], ["lamp", "last sale", 60, 1], ["lamp", "added by you", 60, 2]]);
-    assert.deepStrictEqual([a.totals.value, a.totals.assets, a.totals.withAssets], [3500, 240, 3740], "the last sale's lamp is shown, not counted");
+    // The appraisal: its last sale plus the newest sale of each map asset on it (bench 100, lamp 50); the house is noted, not priced.
+    const a = appraiseProperty(db, "P", { picks: [{ category: "outdoordecor", token: "lamp", count: 2 }] });
+    assert.deepStrictEqual(a.lastSale, { source: "sale", ts: day(30), price: 4000, currency: "UPX", upx: 4000 });
+    assert.deepStrictEqual(a.buildings.map(b => [b.name, b.unfinished, b.startedAt, b.beforeLastSale]), [["Tiny House", false, null, true]]);
+    assert.ok(!("value" in a.buildings[0]), "buildings aren't priced");
+    assert.deepStrictEqual(a.placed, { kind: "listing", ts: day(1), live: true, moved: 0 });
+    assert.deepStrictEqual(a.assets.map(x => [x.token, x.source, x.lastPrice, x.count, x.inSalePrice]),
+      [["bench", "listing", 100, 1, false], ["lamp", "added by you", 50, 2, false]]);
+    assert.deepStrictEqual(a.totals, { property: 4000, assets: 200, unpriced: 0, total: 4200 });
     assert.strictEqual(a.listing.upx, 9000);
     assert.deepStrictEqual(a.history.map(h => h.nfts), [1], "the house's own NFT isn't a map asset");
-    assert.strictEqual(appraiseProperty(db, "nope", { now }), null);
+    assert.strictEqual(appraiseProperty(db, "nope"), null);
+  });
+});
+
+describe("appraisal: what's on the property, and the property's own price", () => {
+  const now = Date.now();
+  const day = n => new Date(now - n * 86_400_000).toISOString();
+  // Q last sold 20 days ago for 5,000 UPX with a bench (10) and a lamp (11) handed over.
+  function setup() {
+    const db = openDb(":memory:");
+    db.prepare("INSERT INTO raw_actions (global_sequence, feed, trx_id, block_num, ts, contract, name, data) VALUES ('x1', 'nft_transfers', 'tx1', 1, ?, 'c', 'transfer', '{}')").run(day(60));
+    const prop = db.prepare("INSERT INTO properties (id, address, city_id, city_name, mint_price, status, updated_at) VALUES (?, ?, 1, 'SF', ?, 'Owned', 'x')");
+    prop.run("Q", "2 MAIN ST", 1000);
+    db.prepare("INSERT INTO property_sales (global_sequence, trx_id, ts, block_num, kind, property_id, price, currency) VALUES ('q1', 'tq1', ?, 50, 'upx', 'Q', 5000, 'UPX')").run(day(20));
+    db.prepare("INSERT INTO property_sale_nfts (sale_seq, dgood_id) VALUES ('q1', 10), ('q1', 11)").run();
+    db.prepare(`INSERT INTO nft_items (id, category, token_name, serial, in_escrow) VALUES
+      (10, 'outdoordecor', 'bench', 1, 0), (11, 'outdoordecor', 'lamp', 1, 0), (12, 'seeds', 'rose', 1, 1), (13, 'outdoordecor', 'bench', 2, 0)`).run();
+    const sale = db.prepare("INSERT INTO nft_sales (global_sequence, trx_id, ts, block_num, price, dg_category, dg_token) VALUES (?, ?, ?, 1, ?, ?, ?)");
+    sale.run("b1", "tb1", day(2), 200, "outdoordecor", "bench");
+    sale.run("b2", "tb2", day(1), 1, "outdoordecor", "bench"); // a 1-UPX gift
+    // The newest lamp sale (10) is under a quarter of the median (85): a gift too, so its last sale is the 80.
+    [[3, 80], [4, 90], [5, 100], [1, 10]].forEach(([d, p], i) => sale.run(`l${i}`, `tl${i}`, day(d), p, "outdoordecor", "lamp"));
+    return db;
+  }
+  const escrow = (db, id, block, nft, kind, direction, propertyId = null) =>
+    db.prepare("INSERT INTO nft_escrow_events (id, global_sequence, ts, block_num, dgood_id, direction, account, kind, property_id) VALUES (?, ?, ?, ?, ?, ?, 'q', ?, ?)")
+      .run(id, id, day(25 - block / 10), block, nft, direction, kind, propertyId); // block 100 = 15 days ago
+
+  test("the last sale is the newest record: its map assets are shown, not added", () => {
+    const a = appraiseProperty(setup(), "Q");
+    assert.deepStrictEqual(a.placed, { kind: "last sale", ts: day(20), live: false, moved: 0 });
+    assert.deepStrictEqual(a.assets.map(x => [x.token, x.source, x.lastPrice, x.lastSaleAt, x.inSalePrice]),
+      [["bench", "last sale", 200, day(2), true], ["lamp", "last sale", 80, day(3), true]]);
+    assert.deepStrictEqual(a.totals, { property: 5000, assets: 0, unpriced: 0, total: 5000 });
+  });
+
+  test("a listing that was pulled is remembered; moved NFTs drop out; ones from the sale aren't added", () => {
+    const db = setup();
+    // Listed 5 days after the sale with the sale's bench, a new bench and a rose; pulled; the rose then listed on its own.
+    for (const nft of [10, 13, 12]) escrow(db, `in${nft}`, 100, nft, "bundle", "in", "Q");
+    for (const nft of [10, 13, 12]) escrow(db, `out${nft}`, 110, nft, "delist", "out");
+    escrow(db, "alone", 150, 12, "listing", "in");
+    const a = appraiseProperty(db, "Q");
+    assert.deepStrictEqual(a.placed, { kind: "listing", ts: day(15), live: false, moved: 1 });
+    assert.deepStrictEqual(a.assets.map(x => [x.token, x.source, x.count, x.inSalePrice]),
+      [["bench", "listing", 1, true], ["bench", "listing", 1, false]]);
+    assert.deepStrictEqual(a.totals, { property: 5000, assets: 200, unpriced: 0, total: 5200 });
+
+    // Relisted later with nothing escrowed: nothing was on it by then.
+    db.prepare("INSERT INTO property_listing_events (id, ts, block_num, property_id, seller, price_upx, present) VALUES ('r1', ?, 200, 'Q', 'q', 9000, 1)").run(day(5));
+    const b = appraiseProperty(db, "Q");
+    assert.deepStrictEqual([b.placed.kind, b.placed.ts, b.assets.length, b.totals.total], ["relisted empty", day(5), 0, 5000]);
+  });
+
+  test("a USD sale is converted at the measured rate; never sold (or only given away) falls back to the mint", () => {
+    const db = setup();
+    db.prepare("INSERT INTO appraisal_stats (key, value, refreshed_at) VALUES ('summary', ?, 'x')").run(JSON.stringify({ usd: { upxPerUsd: 6000 } }));
+    db.prepare("INSERT INTO property_sales (global_sequence, trx_id, ts, block_num, kind, property_id, price, currency) VALUES ('q2', 'tq2', ?, 60, 'usd', 'Q', 10, 'FIAT')").run(day(4));
+    db.prepare("INSERT INTO property_buildings (nft_id, property_id, updated_at, token_name, under_construction, built_at) VALUES (900, 'Q', 'x', 'tiny', 1, ?), (901, 'Q', 'x', 'tiny', 0, ?)").run(day(2), day(40));
+    const a = appraiseProperty(db, "Q");
+    assert.deepStrictEqual(a.lastSale, { source: "sale", ts: day(4), price: 10, currency: "FIAT", upx: 60000 });
+    assert.strictEqual(a.totals.total, 60000);
+    assert.deepStrictEqual(a.placed, { kind: "last sale", ts: day(4), live: false, moved: 0 }, "nothing came with the newer sale");
+    assert.deepStrictEqual(a.buildings.map(b => [b.nftId, b.unfinished, b.beforeLastSale]), [[901, false, true], [900, true, false]]);
+
+    db.prepare("INSERT INTO properties (id, address, city_id, city_name, mint_price, status, updated_at) VALUES ('M', '3 MAIN ST', 1, 'SF', 700, 'Owned', 'x')").run();
+    db.prepare("INSERT INTO property_sales (global_sequence, trx_id, ts, block_num, kind, property_id, price, currency) VALUES ('m1', 'tm1', ?, 70, 'upx', 'M', 1, 'UPX')").run(day(3));
+    const m = appraiseProperty(db, "M");
+    assert.deepStrictEqual(m.lastSale, { source: "mint", ts: null, price: 700, currency: "UPX", upx: 700 });
+    assert.deepStrictEqual([m.placed, m.totals.total], [null, 700]);
   });
 });

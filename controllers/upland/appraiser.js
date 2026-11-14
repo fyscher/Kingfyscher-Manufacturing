@@ -1,7 +1,7 @@
 // Property appraiser and solo build calculator, read from the indexer database.
-// The valuation itself lives in indexer/appraisal.js (land from neighborhood
-// comps, buildings from what buyers paid over the land, map assets from their
-// own resales); this file only finds properties and serves the results.
+// The appraisal itself lives in indexer/appraisal.js (the property's last sale
+// plus the last sale of each map asset on it; buildings named, not priced);
+// this file only finds properties and serves the results.
 const appraiserRouter = require("express").Router();
 const { indexerDb } = require("../../utils/indexerDb");
 const { userExtractor } = require("../../middleware");
