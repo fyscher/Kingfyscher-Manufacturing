@@ -11,6 +11,9 @@ const {
   decodePropertySalesUsd,
   decodeListingEvents,
   decodeOfferEvents,
+  isStorePayment,
+  STORE_PAIR_MS,
+  decodeStoreSales,
 } = require("./decode");
 const {
   insertRawActions,
@@ -22,7 +25,7 @@ const {
   setCheckpoint,
 } = require("./db");
 const { applyListingDeltas } = require("./floors");
-const { applyEscrowEvents, topUpNfts, enrichSales, tagBundles, refreshMarket } = require("./nfts");
+const { applyEscrowEvents, topUpNfts, enrichSales, enrichStoreSales, tagBundles, refreshMarket } = require("./nfts");
 const { applyBuildingDeltas, applyConstructionDeltas, refreshBuildingTypes } = require("./buildings"); // refresh also fills in new buildings' type and city
 const { refreshAppraisal } = require("./appraisal");
 const { fetchContractPayouts } = require("./contracts");
@@ -73,6 +76,14 @@ const FEEDS = {
   a23: { kind: "deltas", params: { code: "playuplandme", scope: "playuplandme", table: "a23" }, windowMin: 360, skipDense: true },
   // Construction contracts taken (~55 a day); each one's price is read from its transaction (contracts.js).
   contracts: { kind: "actions", params: { filter: "playuplandme:n151" }, windowMin: 1440 },
+  // UPX store purchases: empty-memo UPX payments to escrow (~1,700 an hour), paired
+  // with the store handout ~1 s later (decodeStoreSales). The unpaired are pruned.
+  store_payments: {
+    kind: "actions",
+    params: { filter: "upxtokenacct:transfer", "@transfer.to": "playuplandme" },
+    windowMin: 20,
+    keep: a => isStorePayment(a.act?.data),
+  },
 };
 
 // Tables the tail keeps current by replaying a feed's changes, each from its own mark.
@@ -144,12 +155,21 @@ function advance(db, key, doneUntilMs) {
   if (!current || Date.parse(current) < doneUntilMs) setCheckpoint(db, key, iso(doneUntilMs));
 }
 
+// Only payments that paired are worth keeping (a few percent of ~40,000 a day).
+// One is dropped once every store handout that could pair with it has been
+// decoded, so the prune trails the decode window by 15 minutes at both ends:
+// the tail has fetched everything up to its cycle, a backfill the whole day,
+// and both decode contiguous windows, so the 15 minutes before this window
+// were decoded last time.
+const STORE_PRUNE_LAG_MS = 15 * 60_000;
+
 /** Rebuild every decoded table for [from, to) from the raw rows already stored. */
 function decodeRange(db, from, to) {
   const t2 = rawDeltas(db, "t2", from, to);
   const transfers = rawActions(db, "nft_transfers", from, to);
   const upxSales = decodePropertySalesUpx(rawActions(db, "n5", from, to), rawActions(db, "n5_payouts", from, to));
   const usdSales = decodePropertySalesUsd(rawActions(db, "n52", from, to), t2);
+  const storePayments = rawActions(db, "store_payments", iso(Date.parse(from) - STORE_PAIR_MS), to);
   const decoded = {
     nft_sales: upsert(db, "nft_sales", decodeNftSales(rawActions(db, "n112", from, to), transfers)),
     nft_escrow_events: upsert(db, "nft_escrow_events", decodeEscrowEvents(transfers)),
@@ -159,9 +179,14 @@ function decodeRange(db, from, to) {
     property_sale_nfts: upsert(db, "property_sale_nfts", decodeSaleBundles([...upxSales, ...usdSales], transfers)),
     property_listing_events: upsert(db, "property_listing_events", decodeListingEvents(t2)),
     property_offer_events: upsert(db, "property_offer_events", decodeOfferEvents(rawDeltas(db, "t3", from, to))),
+    store_sales: upsert(db, "store_sales", decodeStoreSales(storePayments, transfers)),
   };
   enrichSales(db); // re-decoded sales lose their design tag; put it back
+  enrichStoreSales(db); // and store purchases theirs
   decoded.nft_bundles = tagBundles(db, { from, to }); // and escrow moves their property bundle
+  decoded.store_payments_pruned = db.prepare(`DELETE FROM raw_actions WHERE feed = 'store_payments' AND ts >= ? AND ts < ?
+    AND NOT EXISTS (SELECT 1 FROM store_sales s WHERE s.payment_seq = raw_actions.global_sequence)`)
+    .run(iso(Date.parse(from) - STORE_PRUNE_LAG_MS), iso(Date.parse(to) - STORE_PRUNE_LAG_MS)).changes;
   return decoded;
 }
 

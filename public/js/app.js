@@ -845,6 +845,7 @@ function apPlacedNote(d) {
     d.assets.some(a => a.inSalePrice) ? 'Map assets that came with its last sale are shown, not added: the sale price already paid for them.' : null,
     d.untrackedNfts ? `${plural(d.untrackedNfts, 'other NFT')} on it ${d.untrackedNfts === 1 ? "isn't a map asset" : "aren't map assets"} we track.` : null,
     'Each price is the newest real sale of that design: gifts (1 UPX, or under a quarter of its usual price) and one-off trades over 4x its usual price are skipped.',
+    d.assets.some(a => a.priceFrom === 'store') ? 'A design nobody has resold is priced at what the Upland store charges for it in UPX (marked "store").' : null,
   ].filter(Boolean).join(' ');
 }
 
@@ -892,8 +893,8 @@ function apRender(d) {
         <td>${escHtml(a.name)}</td>
         <td class="muted" style="font-size:0.78rem">${escHtml(apSource(a, d))}</td>
         <td class="num">${a.count}</td>
-        <td class="num">${apUpx(a.lastPrice)}</td>
-        <td class="muted" style="font-size:0.78rem">${a.lastSaleAt ? apDay(a.lastSaleAt) : d.nftSalesFrom ? `No sale since ${apDay(d.nftSalesFrom)}` : 'No sale on record'}</td>
+        <td class="num">${apUpx(a.lastPrice)}${a.priceFrom === 'store' ? ' <span class="muted" style="font-size:0.72rem">store</span>' : ''}</td>
+        <td class="muted" style="font-size:0.78rem">${a.lastSaleAt ? `${apDay(a.lastSaleAt)}${a.priceFrom === 'store' ? ', from the store' : ''}` : d.nftSalesFrom ? `No sale since ${apDay(d.nftSalesFrom)}` : 'No sale on record'}</td>
         <td class="num">${a.inSalePrice ? '<span class="muted">In the sale price</span>' : apUpx(a.lastPrice == null ? null : a.lastPrice * a.count)}</td>
         <td>${a.source === 'added by you' ? `<button class="btn btn--ghost btn--sm" data-ap-remove="${i}">Remove</button>` : ''}</td>
       </tr>`).join('')
