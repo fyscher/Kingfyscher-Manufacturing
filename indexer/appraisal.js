@@ -1,6 +1,10 @@
-// Property appraiser: value = land + each building + the map assets on it, each
-// with a range and the number of sales behind it. The evidence for each rule
-// is noted where the rule is.
+// Property appraiser. For now (Fyscher, 2026-11-10) an appraisal is receipts
+// only: the property's last sale plus the last sale of each map asset on it,
+// with its buildings named but not priced (appraiseProperty, at the end).
+//
+// The hourly refresh still builds the valuation groundwork below, which the
+// Build Calculator reads and which pricing buildings will start from. The
+// evidence for each rule is noted where the rule is.
 //
 // - Land: bare-land UPX sales (no finished building, no NFTs handed over with
 //   the sale) in the property's neighborhood (counted double) and the ones
@@ -9,9 +13,9 @@
 //   paid over the land: price minus the land estimate at that time, over every
 //   single-building sale (median, with a 95% band), plus the same property sold
 //   before and after it was built.
-// - Map assets: their own resales only, so nothing counts twice.
 // - USD sales are a different market (about 6,200 UPX per $1 in Nov 2026, not
-//   the store's 1,000), so land comps are UPX sales only.
+//   the store's 1,000), so land comps are UPX sales only, and a USD price is
+//   converted at that measured rate.
 const { nowIso } = require("./db");
 const { parseBuildMemo, decodeSaleBundles } = require("./decode");
 
@@ -325,7 +329,7 @@ function appraisalStats(db, { landAt, now }) {
     if (l && !l.thin) landRows.push({ price: s.price, est: s.mint * l.p50, low: s.mint * l.p25, high: s.mint * l.p75 });
   }
   // Land plus one building (the building's value uses the whole history, so this flatters it a little).
-  const values = new Map(db.prepare("SELECT token_name, median, p25, p75 FROM building_values WHERE sales >= 5").all().map(v => [v.token_name, v]));
+  const values = new Map(db.prepare("SELECT token_name, median, p25, p75 FROM building_values WHERE sales >= ?").all(MIN_BUILDING_SALES).map(v => [v.token_name, v]));
   const builtRows = [];
   for (const s of db.prepare(`SELECT * FROM appraisal_sales WHERE currency = 'UPX' AND buildings = 1 AND nfts = 0 AND mint > 0 AND ts >= ?`).all(sinceTest)) {
     const v = values.get(s.token_name);
@@ -374,187 +378,171 @@ function fillSaleBundles(db, { log = () => {} } = {}) {
   return total;
 }
 
-// ── map assets ──
-
-/**
- * What one map asset design is worth: the median of its real resales over 30
- * days, widening to 90 days, then everything stored, until there are 3. Gifts
- * (1 UPX, or under a quarter of the median once there are 3 real sales) are left out.
- */
-function designValue(db, category, token, nowMs = Date.now()) {
-  const d = db.prepare("SELECT display_name, floor_30d, sales_30d FROM market_designs WHERE category = ? AND token_name = ?").get(category, token);
-  const all = db.prepare("SELECT ts, price FROM nft_sales WHERE dg_category = ? AND dg_token = ? AND price > ? ORDER BY ts DESC LIMIT 1000")
-    .all(category, token, TOKEN_PRICE);
-  const ref = all.length >= 3 ? quantile(sortNum(all.map(s => s.price)), 0.5) : null;
-  const real = ref == null ? all : all.filter(s => s.price >= ref * GIFT_SHARE);
-  let windowDays = null;
-  let used = [];
-  for (const days of [30, 90, null]) {
-    used = days ? real.filter(s => Date.parse(s.ts) >= nowMs - days * DAY) : real;
-    windowDays = days;
-    if (used.length >= 3) break;
-  }
-  const prices = sortNum(used.map(s => s.price));
-  return {
-    category, token, name: d?.display_name || token,
-    value: quantile(prices, 0.5), low: quantile(prices, 0.25), high: quantile(prices, 0.75),
-    floor: d?.floor_30d ?? null, sales: prices.length, windowDays: prices.length ? windowDays : null,
-    thin: prices.length < 3,
-  };
-}
+// ── one property ──
 
 const NOT_MAP_ASSETS = new Set(["structure"]); // a building's own NFT is the building
 
-/** Group NFT ids into designs with counts; buildings and untracked NFTs are counted apart. */
-function designsOf(db, ids) {
-  const item = db.prepare("SELECT category, token_name FROM nft_items WHERE id = ?");
-  const building = db.prepare("SELECT 1 FROM property_buildings WHERE nft_id = ?");
-  const groups = new Map();
-  let untracked = 0;
-  for (const id of ids) {
-    const i = item.get(id);
-    if (!i) {
-      if (!building.get(id)) untracked++;
+// A sale over 4x the median is a one-off trade, not a price: UPX moved between
+// players dressed up as a sale (2026-11-14: a picket fence corner that sells for
+// 12 to 150 UPX "sold" for 76,500, serial 4609; Rolling Stone 142,000 against a
+// steady 200). The mirror image of a gift.
+const OVERPAY_MULTIPLE = 4;
+
+/**
+ * The newest real sale of one map asset design, at the seller's price. A 1-UPX
+ * sale is a gift, and so is one under a quarter of the median once there are 3
+ * real sales (the same rule as the map asset browser, nfts.js); one over 4x the
+ * median is skipped the same way.
+ */
+function designLastSale(db, category, token) {
+  const d = db.prepare("SELECT display_name FROM market_designs WHERE category = ? AND token_name = ?").get(category, token);
+  const all = db.prepare("SELECT ts, price FROM nft_sales WHERE dg_category = ? AND dg_token = ? AND price > ? ORDER BY ts DESC LIMIT 1000")
+    .all(category, token, TOKEN_PRICE);
+  const ref = all.length >= 3 ? quantile(sortNum(all.map(s => s.price)), 0.5) : null;
+  const last = all.find(s => ref == null || (s.price >= ref * GIFT_SHARE && s.price <= ref * OVERPAY_MULTIPLE)) || null;
+  return { name: d?.display_name || token, lastPrice: last?.price ?? null, lastSaleAt: last?.ts ?? null };
+}
+
+/**
+ * What's placed on a property, from the newest record of it. Upland records
+ * placed NFTs only when the property is listed (they go into escrow with it in
+ * the same block, kind 'bundle') or sold (handed to the buyer in the sale).
+ * - Listing: its latest bundle is kept after the listing is pulled, so listing
+ *   for a minute is enough (Fyscher, 2026-11-14). An NFT that did anything after
+ *   coming back (listed on its own, sold, bundled with another property) has
+ *   moved and is dropped. Pulled and later relisted with nothing escrowed:
+ *   nothing was on it by then.
+ * - Last sale: what was handed over in it, when it's inside the stored NFT
+ *   history (`saleCovered`).
+ * The newer record wins; null when there's neither.
+ */
+function placedRecord(db, propertyId, lastSale, saleIds, saleCovered) {
+  const records = [];
+  const bundle = db.prepare("SELECT block_num, ts FROM nft_escrow_events WHERE property_id = ? AND kind = 'bundle' ORDER BY block_num DESC LIMIT 1").get(propertyId);
+  if (bundle) {
+    const ids = db.prepare("SELECT dgood_id AS id FROM nft_escrow_events WHERE property_id = ? AND kind = 'bundle' AND block_num = ?")
+      .all(propertyId, bundle.block_num).map(r => r.id);
+    const after = db.prepare("SELECT block_num, kind FROM nft_escrow_events WHERE dgood_id = ? AND block_num > ? ORDER BY block_num");
+    const kept = [];
+    let moved = 0;
+    let pulled = null; // the block the listing gave them back in
+    for (const nft of ids) {
+      const later = after.all(nft, bundle.block_num);
+      if (later.length && later[0].kind === "delist") pulled = Math.max(pulled ?? 0, later[0].block_num);
+      if (later.length > 1 || (later.length === 1 && later[0].kind !== "delist")) moved++;
+      else kept.push(nft);
     }
-    else if (!NOT_MAP_ASSETS.has(i.category)) {
-      const k = `${i.category}/${i.token_name}`;
-      groups.set(k, { category: i.category, token: i.token_name, count: (groups.get(k)?.count || 0) + 1 });
-    }
+    const relist = pulled == null ? null
+      : db.prepare("SELECT ts FROM property_listing_events WHERE property_id = ? AND present = 1 AND block_num > ? ORDER BY block_num LIMIT 1").get(propertyId, pulled);
+    records.push(relist
+      ? { kind: "relisted empty", ts: relist.ts, ids: [], moved: 0, live: false }
+      : { kind: "listing", ts: bundle.ts, ids: kept, moved, live: pulled == null });
   }
-  return { designs: [...groups.values()], untracked };
-}
-
-// ── one property ──
-
-const MIN_CONTRACTS = 3;
-/**
- * What having one built costs: the median contract price for that building
- * when there are 3+ in 90 days, else its Sparklet-hours at the going contract
- * rate (UPX per million Sparklet-hours).
- */
-function buildCost(v, stats) {
-  if (!v) return null;
-  if (v.contract_n >= MIN_CONTRACTS) return { value: v.contract_median, basis: "contracts", n: v.contract_n };
-  if (v.hours_needed > 0 && stats?.contracts?.p50) return { value: Math.round((v.hours_needed * stats.contracts.p50) / 1e6), basis: "rate", n: stats.contracts.n };
-  return null;
+  if (lastSale && saleCovered) records.push({ kind: "last sale", ts: lastSale.ts, ids: saleIds, moved: 0, live: false });
+  return records.sort((a, b) => (a.ts < b.ts ? 1 : -1))[0] || null;
 }
 
 /**
- * Appraise one property now. `picks` = map asset designs the user says are on
- * it ([{category, token, count}]): Upland records placed NFTs only when the
- * property is listed or sold.
+ * Appraise one property: its last sale (a 1-UPX sale is a transfer; never sold
+ * since the appchain started: its mint price) plus the last sale of each map
+ * asset on it. Map assets handed over in that last sale are listed but not
+ * added, since its price already paid for them. `picks` = map asset designs the
+ * user says are on it ([{category, token, count}]), always added. Buildings are
+ * named, not priced.
  */
-function appraiseProperty(db, propertyId, { picks = [], now = Date.now() } = {}) {
+function appraiseProperty(db, propertyId, { picks = [] } = {}) {
   const id = String(propertyId);
   const property = db.prepare("SELECT * FROM properties WHERE id = ?").get(id);
-  const salesHere = db.prepare(`SELECT s.global_sequence, s.ts, s.price, s.currency, s.buyer, s.seller, s.address,
+  const salesHere = db.prepare(`SELECT s.global_sequence, s.ts, s.price, s.currency, s.address,
       (SELECT COUNT(*) FROM property_sale_nfts n LEFT JOIN nft_items i ON i.id = n.dgood_id
         WHERE n.sale_seq = s.global_sequence AND COALESCE(i.category, '') != 'structure'
           AND NOT EXISTS (SELECT 1 FROM property_buildings pb WHERE pb.nft_id = n.dgood_id)) AS nfts
     FROM property_sales s WHERE s.property_id = ? ORDER BY s.ts DESC`).all(id);
   if (!property && !salesHere.length) return null;
-
-  // Land
-  let land = null;
-  if (property?.mint_price > 0) {
-    const adj = adjacencyMap(db);
-    const own = property.neighborhood_id;
-    const { ring1, ring2 } = own == null ? { ring1: [], ring2: [] } : ringsAround(adj, own);
-    const ids = [own, ...ring1, ...ring2].filter(x => x != null);
-    const since = new Date(now - 180 * DAY).toISOString();
-    const rows = ids.length
-      ? db.prepare(`SELECT global_sequence, property_id, ts, price, mint, neighborhood_id, city_id FROM appraisal_sales
-          WHERE ${BARE_UPX} AND ts >= ? AND neighborhood_id IN (${ids.map(() => "?").join(", ")})`).all(since, ...ids)
-      : [];
-    const near = landIndex(rows);
-    let cityList = null;
-    const cityComps = cityId => {
-      if (!cityList) {
-        cityList = landIndex(db.prepare(`SELECT global_sequence, property_id, ts, price, mint, neighborhood_id, city_id FROM appraisal_sales
-          WHERE ${BARE_UPX} AND ts >= ? AND city_id = ?`).all(new Date(now - 90 * DAY).toISOString(), cityId)).cityComps(cityId);
-      }
-      return cityList;
-    };
-    const r = landRatio({ comps: near.comps, cityComps, own, ring1, ring2, cityId: property.city_id, atMs: now });
-    if (r) {
-      const addr = db.prepare("SELECT address, neighborhood_name FROM properties WHERE id = ?");
-      land = {
-        low: property.mint_price * r.p25, value: property.mint_price * r.p50, high: property.mint_price * r.p75,
-        ratio: { p25: r.p25, p50: r.p50, p75: r.p75 }, comps: r.n, scope: r.scope, days: r.days, thin: r.thin,
-        recent: r.comps.slice(0, 12).map(c => ({
-          ts: c.ts, price: c.price, mint: c.mint, ratio: c.ratio, ring: c.ring, propertyId: c.property_id, ...addr.get(c.property_id),
-        })),
-      };
-    }
-  }
-
-  // Buildings
-  const values = db.prepare("SELECT * FROM building_values WHERE token_name = ?");
-  const eta = db.prepare("SELECT eta FROM constructions WHERE nft_id = ?");
   const stats = JSON.parse(db.prepare("SELECT value FROM appraisal_stats WHERE key = 'summary'").get()?.value || "{}");
-  const names = db.prepare("SELECT MAX(name) AS name FROM building_types WHERE token_name = ?");
-  const buildings = db.prepare("SELECT nft_id, token_name, under_construction, built_at FROM property_buildings WHERE property_id = ?").all(id).map(b => {
-    const v = b.token_name ? values.get(b.token_name) : null;
-    const ok = v && v.sales >= MIN_BUILDING_SALES;
-    return {
-      nftId: b.nft_id, token: b.token_name, name: v?.name || (b.token_name && names.get(b.token_name)?.name) || b.token_name || "Unidentified building",
-      builtAt: b.built_at, unfinished: b.under_construction === 1, finishes: b.under_construction === 1 ? eta.get(b.nft_id)?.eta ?? null : null,
-      // A building can't be worth less than nothing, whatever a noisy sale says.
-      value: ok ? Math.max(0, v.median) : null, low: ok ? Math.max(0, v.p25) : null, high: ok ? Math.max(0, v.p75) : null,
-      band: ok ? [v.ci_low, v.ci_high] : null, sales: v?.sales ?? 0, pairs: v?.pairs ?? 0, pairMedian: v?.pair_median ?? null,
-      hoursNeeded: v?.hours_needed ?? null, toBuild: buildCost(v, stats),
-    };
-  });
-  const finished = buildings.filter(b => !b.unfinished);
-  const unvalued = finished.filter(b => b.value == null);
+  const upxPerUsd = stats.usd?.upxPerUsd ?? null;
 
-  // Map assets: on its listing, handed over at its last sale, or picked by the user.
-  const listedIds = db.prepare(`SELECT DISTINCT e.dgood_id AS id FROM nft_escrow_events e JOIN nft_items i ON i.id = e.dgood_id AND i.in_escrow = 1
-    WHERE e.property_id = ? AND e.kind = 'bundle'
-      AND NOT EXISTS (SELECT 1 FROM nft_escrow_events x WHERE x.dgood_id = e.dgood_id AND x.block_num > e.block_num)`).all(id).map(r => r.id);
-  const lastSale = salesHere[0] || null;
-  const lastSaleIds = lastSale ? db.prepare("SELECT dgood_id AS id FROM property_sale_nfts WHERE sale_seq = ?").all(lastSale.global_sequence).map(r => r.id) : [];
-  const valued = (list, source) => list.map(x => ({ ...designValue(db, x.category, x.token, now), count: x.count || 1, source }));
-  const onListing = designsOf(db, listedIds);
-  const atLastSale = designsOf(db, lastSaleIds);
+  // The property
+  const last = salesHere.find(s => s.price > TOKEN_PRICE) || null;
+  const lastSale = last
+    ? { source: "sale", ts: last.ts, price: last.price, currency: last.currency, upx: last.currency === "UPX" ? last.price : upxPerUsd ? last.price * upxPerUsd : null }
+    : property?.mint_price > 0 ? { source: "mint", ts: null, price: property.mint_price, currency: "UPX", upx: property.mint_price } : null;
+
+  // Buildings: noted, not priced. No construction start on record = before the stored build history.
+  const names = db.prepare("SELECT MAX(name) AS name FROM building_types WHERE token_name = ?");
+  const eta = db.prepare("SELECT eta FROM constructions WHERE nft_id = ?");
+  const buildings = db.prepare("SELECT nft_id, token_name, under_construction, built_at FROM property_buildings WHERE property_id = ? ORDER BY built_at").all(id).map(b => ({
+    nftId: b.nft_id, token: b.token_name, name: (b.token_name && names.get(b.token_name)?.name) || b.token_name || "Unidentified building",
+    unfinished: b.under_construction === 1, finishes: b.under_construction === 1 ? eta.get(b.nft_id)?.eta ?? null : null,
+    startedAt: b.built_at,
+    beforeLastSale: lastSale?.source === "sale" ? b.built_at == null || b.built_at <= lastSale.ts : null,
+  }));
+
+  // Map assets
+  const nftHistoryFrom = db.prepare("SELECT MIN(ts) AS t FROM raw_actions WHERE feed = 'nft_transfers'").get().t;
+  const saleIds = last ? db.prepare("SELECT dgood_id AS id FROM property_sale_nfts WHERE sale_seq = ?").all(last.global_sequence).map(r => r.id) : [];
+  const record = placedRecord(db, id, last, saleIds, last != null && nftHistoryFrom != null && last.ts >= nftHistoryFrom);
+  const inSale = new Set(saleIds);
+  const item = db.prepare("SELECT category, token_name FROM nft_items WHERE id = ?");
+  const building = db.prepare("SELECT 1 FROM property_buildings WHERE nft_id = ?");
+  const prices = new Map();
+  const priced = (category, token) => {
+    const k = `${category}/${token}`;
+    if (!prices.has(k)) prices.set(k, designLastSale(db, category, token));
+    return prices.get(k);
+  };
+  const rows = new Map();
+  let untracked = 0;
+  for (const nft of record?.ids || []) {
+    const i = item.get(nft);
+    if (!i) {
+      if (!building.get(nft)) untracked++;
+      continue;
+    }
+    if (NOT_MAP_ASSETS.has(i.category)) continue;
+    const source = record.kind === "last sale" ? "last sale" : "listing";
+    const k = `${i.category}/${i.token_name}/${source}/${inSale.has(nft)}`;
+    if (rows.has(k)) rows.get(k).count++;
+    else rows.set(k, { category: i.category, token: i.token_name, ...priced(i.category, i.token_name), count: 1, source, inSalePrice: inSale.has(nft) });
+  }
   const assets = [
-    ...valued(onListing.designs, "listing"),
-    ...valued(atLastSale.designs, "last sale"),
-    ...valued(picks.filter(p => p.category && p.token), "added by you"),
+    ...rows.values(),
+    ...picks.filter(p => p.category && p.token).map(p => ({ category: p.category, token: p.token, ...priced(p.category, p.token), count: p.count || 1, source: "added by you", inSalePrice: false })),
   ];
 
+  const added = assets.filter(a => !a.inSalePrice);
+  const assetsUpx = added.reduce((t, a) => t + (a.lastPrice ?? 0) * a.count, 0);
   const listing = db.prepare("SELECT price_upx, price_fiat, snapshot_at FROM listings_current WHERE property_id = ?").get(id) || null;
-  const sum = (xs, f) => xs.reduce((t, x) => t + (f(x) ?? 0), 0);
-  // Counted in the total: what's escrowed with its listing now, and what the user
-  // added. What came with the last sale may have been moved since, so it's shown only.
-  const countedAssets = assets.filter(a => a.source !== "last sale");
-  const propertyTotal = land ? { low: land.low + sum(finished, b => b.low), value: land.value + sum(finished, b => b.value), high: land.high + sum(finished, b => b.high) } : null;
-  const assetsTotal = sum(countedAssets, a => (a.value ?? 0) * a.count);
 
   return {
     property: property ? {
       id, address: property.address, city: property.city_name, cityId: property.city_id, neighborhood: property.neighborhood_name,
       neighborhoodId: property.neighborhood_id, mint: property.mint_price, status: property.status,
     } : { id, address: salesHere.find(s => s.address)?.address ?? null },
-    land,
+    lastSale,
     buildings,
-    buildingsNote: finished.length > 1 ? "Several buildings: each value comes from single-building sales, so the sum is rough." : null,
-    unvaluedBuildings: unvalued.length,
-    minBuildingSales: MIN_BUILDING_SALES,
+    placed: record ? { kind: record.kind, ts: record.ts, live: record.live, moved: record.moved } : null,
     assets,
-    lastSaleAt: lastSale?.ts ?? null,
-    untrackedNfts: onListing.untracked + atLastSale.untracked,
-    totals: propertyTotal ? { ...propertyTotal, assets: assetsTotal, withAssets: propertyTotal.value + assetsTotal } : null,
+    untrackedNfts: untracked,
+    totals: {
+      property: lastSale?.upx ?? null,
+      assets: assetsUpx,
+      unpriced: added.filter(a => a.lastPrice == null).reduce((t, a) => t + a.count, 0),
+      total: lastSale?.upx != null ? lastSale.upx + assetsUpx : null,
+    },
     listing: listing ? {
       upx: listing.price_upx || null, usd: listing.price_fiat || null,
-      usdInUpx: listing.price_fiat && stats.usd ? listing.price_fiat * stats.usd.upxPerUsd : null, asOf: listing.snapshot_at,
+      usdInUpx: listing.price_fiat && upxPerUsd ? listing.price_fiat * upxPerUsd : null, asOf: listing.snapshot_at,
     } : null,
     history: salesHere.map(s => ({ ts: s.ts, price: s.price, currency: s.currency, nfts: s.nfts })),
-    stats,
+    upxPerUsd,
+    nftSalesFrom: db.prepare("SELECT MIN(ts) AS t FROM nft_sales").get().t,
+    nftHistoryFrom,
+    buildsFrom: db.prepare("SELECT MIN(ts) AS t FROM raw_actions WHERE feed = 'builds'").get().t,
   };
 }
 
 module.exports = {
   quantile, weightedQuantile, medianBand, ringsAround, landRatio, landIndex, between,
-  rebuildAppraisalSales, buildRules, refreshAppraisal, fillSaleBundles, designValue, appraiseProperty, buildCost, MIN_COMPS,
+  rebuildAppraisalSales, buildRules, refreshAppraisal, fillSaleBundles, designLastSale, placedRecord, appraiseProperty, MIN_COMPS,
 };

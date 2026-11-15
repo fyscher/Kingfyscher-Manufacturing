@@ -758,16 +758,14 @@ document.querySelector('.nav-item[data-section="buildings"]').addEventListener('
 });
 
 /* ── Property Appraiser ──────────────────────────────────
-   Land from comparable bare-land sales in the neighborhood and the ones
-   bordering it, each building from what buyers paid over the land, map assets
-   from their own resales (indexer/appraisal.js). */
+   For now, receipts only: the property's last sale plus the last sale of each
+   map asset on it. Buildings are noted, not priced (indexer/appraisal.js). */
 const apQ       = $('ap-q');
 const apSuggest = $('ap-suggest');
 const apCity    = $('ap-city');
 const apError   = $('ap-error');
 const apState   = { id: null, picks: [], seq: 0, searchSeq: 0, assetSeq: 0, assetMatches: [] };
 const apUpx  = n => (n == null ? '—' : `${Math.round(n).toLocaleString()} UPX`);
-const apX    = n => (n == null ? '—' : `${n.toFixed(2)}x`);
 const apPct  = n => `${Math.round(n * 100)}%`;
 const apDay  = ts => new Date(ts).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
 const apRowStyle = 'padding:0.5rem 0.75rem;cursor:pointer;border-bottom:1px solid var(--border)';
@@ -825,102 +823,95 @@ async function apOpen(id, { keepPicks = false } = {}) {
   }
 }
 
-const AP_SOURCES = {
-  listing: () => 'Escrowed with its listing right now',
-  'last sale': d => `Handed over at its last sale${d.lastSaleAt ? ` (${apDay(d.lastSaleAt)})` : ''}; may have been moved since, so not counted`,
-  'added by you': () => 'Added by you',
-};
-const AP_RINGS = { own: 'this neighborhood', bordering: 'bordering', 'two rings out': 'two rings out', city: 'elsewhere in the city' };
+// Where each map asset row is known from (placedRecord in indexer/appraisal.js).
+function apSource(a, d) {
+  if (a.source === 'added by you') return 'Added by you';
+  if (a.source === 'last sale') return `Came with its last sale (${apDay(d.placed.ts)})`;
+  return d.placed.live ? `Escrowed with its listing (since ${apDay(d.placed.ts)})` : `On its listing of ${apDay(d.placed.ts)}, pulled since`;
+}
+
+function apPlacedNote(d) {
+  const p = d.placed;
+  const from = d.nftHistoryFrom ? apDay(d.nftHistoryFrom) : 'our records began';
+  const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
+  const one = p && p.moved === 1;
+  return [
+    !p ? `Upland only records what's placed on a property when it's listed (escrowed with the listing) or sold (handed to the buyer), and neither has happened with anything on this one since ${from}. Listing it for a minute and pulling the listing is enough to record it; or add what's on it below.`
+      : p.kind === 'relisted empty' ? `It was relisted on ${apDay(p.ts)} with nothing escrowed, so nothing was placed on it then. Anything added since, add below.`
+      : p.kind === 'last sale' ? (d.assets.some(a => a.source === 'last sale') ? `What was handed to the buyer at its last sale (${apDay(p.ts)}).` : `Nothing came with its last sale (${apDay(p.ts)}).`)
+      : p.live ? `What's escrowed with its listing right now (listed ${apDay(p.ts)}).`
+      : `What was escrowed with its listing of ${apDay(p.ts)}, pulled since. That's true as of then: after moving things, list it and pull it again.`,
+    p && p.moved ? `${plural(p.moved, 'item')} from that listing ${one ? 'has' : 'have'} since been sold or listed on ${one ? 'its' : 'their'} own, so ${one ? "it's" : "they're"} left out.` : null,
+    d.assets.some(a => a.inSalePrice) ? 'Map assets that came with its last sale are shown, not added: the sale price already paid for them.' : null,
+    d.untrackedNfts ? `${plural(d.untrackedNfts, 'other NFT')} on it ${d.untrackedNfts === 1 ? "isn't a map asset" : "aren't map assets"} we track.` : null,
+    'Each price is the newest real sale of that design: gifts (1 UPX, or under a quarter of its usual price) and one-off trades over 4x its usual price are skipped.',
+  ].filter(Boolean).join(' ');
+}
 
 function apRender(d) {
   const p = d.property;
   const t = d.totals;
+  const s = d.lastSale;
   $('ap-title').textContent = p.address || `Property ${p.id}`;
   $('ap-sub').textContent = [p.city, p.neighborhood, p.mint ? `mint ${apUpx(p.mint)}` : null, p.status, `id ${p.id}`].filter(Boolean).join(' · ');
 
-  $('ap-stat-total').textContent = t ? apUpx(t.value) : '—';
-  $('ap-stat-total-range').textContent = t ? `typical ${apUpx(t.low)} to ${apUpx(t.high)}` : 'no land estimate';
-  $('ap-stat-land').textContent = d.land ? apUpx(d.land.value) : '—';
-  $('ap-stat-land-range').textContent = d.land ? `${apUpx(d.land.low)} to ${apUpx(d.land.high)}` : '';
-  const finished = d.buildings.filter(b => !b.unfinished);
-  const unfinished = d.buildings.length - finished.length;
-  $('ap-stat-buildings').textContent = finished.length ? apUpx(finished.reduce((s, b) => s + (b.value || 0), 0)) : 'None';
-  $('ap-stat-buildings-note').textContent = [
-    finished.length ? `${finished.length} finished` : null,
-    d.unvaluedBuildings ? `${d.unvaluedBuildings} not valued` : null,
-    unfinished ? `${unfinished} under construction, not counted` : null,
+  // Summary
+  const added = d.assets.filter(a => !a.inSalePrice);
+  const count = list => list.reduce((n, a) => n + a.count, 0);
+  $('ap-stat-total').textContent = apUpx(t.total);
+  $('ap-stat-total-note').textContent = t.total == null
+    ? (s ? 'no UPX-per-$ rate yet to convert the sale' : 'no sale or mint price on record')
+    : ['last sale + map assets', t.unpriced ? `${t.unpriced} map asset${t.unpriced === 1 ? '' : 's'} with no sale on record` : null].filter(Boolean).join(' · ');
+  $('ap-stat-sale').textContent = !s ? '—' : s.currency === 'UPX' ? apUpx(s.price) : `$${Number(s.price).toLocaleString()}`;
+  $('ap-stat-sale-note').textContent = !s ? 'no sale on record'
+    : s.source === 'mint' ? 'mint price: no real sale since the appchain started (April 2025)'
+    : [apDay(s.ts), s.currency === 'UPX' ? null : s.upx != null ? `~${apUpx(s.upx)} at ${d.upxPerUsd.toLocaleString()} UPX per $1` : 'no rate to convert it'].filter(Boolean).join(' · ');
+  $('ap-stat-assets').textContent = added.length ? apUpx(t.assets) : 'None added';
+  $('ap-stat-assets-note').textContent = [
+    added.length ? `${count(added)} added` : null,
+    added.length < d.assets.length ? `${count(d.assets) - count(added)} already in the sale price` : null,
   ].filter(Boolean).join(' · ');
-  $('ap-stat-assets').textContent = t && t.assets ? apUpx(t.assets) : '—';
-  $('ap-stat-with-assets').textContent = t && t.assets ? `with them: ${apUpx(t.withAssets)}` : 'none counted yet';
+  const unfinished = d.buildings.filter(b => b.unfinished).length;
+  $('ap-stat-buildings').textContent = !d.buildings.length ? 'None' : d.buildings.length === 1 ? d.buildings[0].name : `${d.buildings.length} buildings`;
+  $('ap-stat-buildings-note').textContent = d.buildings.length
+    ? ['noted, not priced', unfinished ? `${unfinished} under construction` : null].filter(Boolean).join(' · ')
+    : '';
   const ask = d.listing;
   $('ap-stat-ask').textContent = ask ? (ask.upx ? apUpx(ask.upx) : ask.usd ? `$${ask.usd.toLocaleString()}` : '—') : 'Not listed';
   const askUpx = ask ? ask.upx || ask.usdInUpx : null;
-  $('ap-stat-ask-note').textContent = ask && askUpx && t
-    ? `${askUpx >= t.withAssets ? `${apPct(askUpx / t.withAssets - 1)} above` : `${apPct(1 - askUpx / t.withAssets)} below`} the appraisal${ask.usd && !ask.upx ? ` (at ~${d.stats.usd ? d.stats.usd.upxPerUsd.toLocaleString() : '?'} UPX per $1)` : ''}`
+  $('ap-stat-ask-note').textContent = askUpx && t.total
+    ? `${askUpx >= t.total ? `${apPct(askUpx / t.total - 1)} above` : `${apPct(1 - askUpx / t.total)} below`} the total${ask.usd && !ask.upx ? ` (at ~${d.upxPerUsd.toLocaleString()} UPX per $1)` : ''}`
     : '';
 
-  // Land
-  const l = d.land;
-  $('ap-comps-count').textContent = l ? l.comps : 0;
-  $('ap-land-note').textContent = l
-    ? `${l.comps} bare-land UPX sales from ${l.scope}, last ${l.days} days (this neighborhood counts double): land here sells for ${apX(l.ratio.p50)} its mint, middle half ${apX(l.ratio.p25)} to ${apX(l.ratio.p75)}.${l.thin ? ' Few sales to go on: treat it as rough.' : ''}`
-    : p.mint ? 'No comparable bare-land sales nearby to go on.' : 'This property has no mint price in the catalog, so the land can\'t be valued.';
-  $('ap-comps-body').innerHTML = l && l.recent.length
-    ? l.recent.map(c => `
-      <tr>
-        <td>${apDay(c.ts)}</td>
-        <td>${escHtml(c.address || c.propertyId)}</td>
-        <td class="muted">${escHtml(c.ring === 'own' ? (p.neighborhood || 'this neighborhood') : (c.neighborhood_name ? `${c.neighborhood_name} (${AP_RINGS[c.ring] || c.ring})` : AP_RINGS[c.ring] || c.ring))}</td>
-        <td class="num">${apUpx(c.price)}</td>
-        <td class="num">${apUpx(c.mint)}</td>
-        <td class="num">${apX(c.ratio)}</td>
-      </tr>`).join('')
-    : '<tr class="table-empty"><td colspan="6">No comparable sales</td></tr>';
-
-  // Buildings
-  $('ap-buildings-count').textContent = d.buildings.length;
-  $('ap-buildings-note').textContent = [
-    'A building never sells on its own, so its value is what buyers paid over the land: each sale of a property with just that building, minus the land estimate at the time, median over 180 days.',
-    d.buildingsNote,
-  ].filter(Boolean).join(' ');
-  $('ap-buildings-body').innerHTML = d.buildings.length
-    ? d.buildings.map(b => `
-      <tr>
-        <td>${escHtml(b.name)}</td>
-        <td class="muted">${b.unfinished ? `Under construction${b.finishes ? `, finishes ~${apDay(b.finishes)}` : ''}` : b.builtAt ? `Built ${apDay(b.builtAt)}` : 'Finished'}</td>
-        <td class="num">${b.value == null ? '<span class="muted">not valued</span>' : apUpx(b.value)}</td>
-        <td class="num">${b.value == null ? '—' : `${apUpx(b.low)} to ${apUpx(b.high)}`}</td>
-        <td class="muted" style="font-size:0.78rem">${b.value == null
-          ? `Only ${b.sales} sale${b.sales === 1 ? '' : 's'} of this building: too few (needs ${d.minBuildingSales})`
-          : `${b.sales.toLocaleString()} sales${b.band && b.band[0] != null ? `; median likely ${apUpx(b.band[0])} to ${apUpx(b.band[1])}` : ''}${b.pairs ? `; same property sold before and after building: ${apUpx(b.pairMedian)} (${b.pairs})` : ''}`}${b.toBuild
-          ? `<br>To have one built: ${b.toBuild.basis === 'contracts' ? `${apUpx(b.toBuild.value)} (median of ${b.toBuild.n} contracts)` : `~${apUpx(b.toBuild.value)} (its Sparklet-hours at the going contract rate)`}`
-          : ''}</td>
-      </tr>`).join('')
-    : '<tr class="table-empty"><td colspan="5">No buildings on this property</td></tr>';
-
   // Map assets
-  const decor = d.stats.decor;
-  $('ap-assets-count').textContent = d.assets.reduce((s, a) => s + a.count, 0);
-  $('ap-assets-note').textContent = [
-    'Upland only records what\'s placed on a property when it\'s listed (escrowed with the listing) or sold (handed to the buyer). Anything else, add below.',
-    d.untrackedNfts ? `${d.untrackedNfts} other NFT${d.untrackedNfts === 1 ? '' : 's'} came with it that aren't map assets we track.` : null,
-    decor && decor.medianWith && decor.medianWithout
-      ? `Do buyers pay for them? Bare land sold with decorations went for ${apPct(Math.abs(decor.medianWith / decor.medianWithout - 1))} ${decor.medianWith >= decor.medianWithout ? 'more' : 'less'} than land without, against the same land estimate (median of ${decor.withNfts.toLocaleString()} vs ${decor.without.toLocaleString()} sales). So the total "with them" is what they'd fetch sold separately, not what they add to the property.`
-      : null,
-  ].filter(Boolean).join(' ');
+  $('ap-assets-count').textContent = count(d.assets);
+  $('ap-assets-note').textContent = apPlacedNote(d);
   $('ap-assets-body').innerHTML = d.assets.length
     ? d.assets.map((a, i) => `
       <tr>
         <td>${escHtml(a.name)}</td>
-        <td class="muted" style="font-size:0.78rem">${escHtml((AP_SOURCES[a.source] || (() => a.source))(d))}</td>
+        <td class="muted" style="font-size:0.78rem">${escHtml(apSource(a, d))}</td>
         <td class="num">${a.count}</td>
-        <td class="num">${apUpx(a.value)}</td>
-        <td class="num">${a.value == null ? '—' : apUpx(a.value * a.count)}</td>
-        <td class="muted" style="font-size:0.78rem">${a.sales ? `${a.sales} sales, ${a.windowDays ? `${a.windowDays} days` : 'all stored history'}${a.thin ? ' (thin)' : ''}` : 'No real sales stored'}</td>
+        <td class="num">${apUpx(a.lastPrice)}</td>
+        <td class="muted" style="font-size:0.78rem">${a.lastSaleAt ? apDay(a.lastSaleAt) : d.nftSalesFrom ? `No sale since ${apDay(d.nftSalesFrom)}` : 'No sale on record'}</td>
+        <td class="num">${a.inSalePrice ? '<span class="muted">In the sale price</span>' : apUpx(a.lastPrice == null ? null : a.lastPrice * a.count)}</td>
         <td>${a.source === 'added by you' ? `<button class="btn btn--ghost btn--sm" data-ap-remove="${i}">Remove</button>` : ''}</td>
       </tr>`).join('')
     : '<tr class="table-empty"><td colspan="7">None recorded</td></tr>';
   apState.rendered = d.assets;
+
+  // Buildings
+  $('ap-buildings-count').textContent = d.buildings.length;
+  $('ap-buildings-note').textContent = 'Noted, not priced. A building never sells on its own, so what one adds to a property comes later.';
+  $('ap-buildings-body').innerHTML = d.buildings.length
+    ? d.buildings.map(b => `
+      <tr>
+        <td>${escHtml(b.name)}</td>
+        <td class="muted">${b.unfinished ? `Under construction${b.finishes ? `, finishes ~${apDay(b.finishes)}` : ''}` : 'Finished'}</td>
+        <td class="muted">${b.startedAt ? apDay(b.startedAt) : `Before ${d.buildsFrom ? apDay(d.buildsFrom) : 'our build records'}`}</td>
+        <td class="muted">${b.beforeLastSale == null ? '—' : b.beforeLastSale ? 'Already there (built or underway)' : 'Started after it'}</td>
+      </tr>`).join('')
+    : '<tr class="table-empty"><td colspan="4">No buildings on this property</td></tr>';
 
   // History
   $('ap-history-count').textContent = d.history.length;
@@ -932,15 +923,6 @@ function apRender(d) {
         <td class="num">${h.nfts || '<span class="muted">0</span>'}</td>
       </tr>`).join('')
     : '<tr class="table-empty"><td colspan="3">No sales since the appchain started (April 2025)</td></tr>';
-
-  // Trust
-  const bt = d.stats.backtest;
-  $('ap-method').innerHTML = [
-    bt && bt.land.n ? `Tested on the last ${bt.days} days of sales, each appraised only from sales before it: <strong>land alone was off by a median ${apPct(bt.land.medianError)}</strong> (${bt.land.n.toLocaleString()} sales), within 25% on ${apPct(bt.land.within25)} of them, and the real price fell inside the low-to-high range ${apPct(bt.land.insideRange)} of the time (a middle-half range should catch about half).` : null,
-    bt && bt.withBuilding.n ? `Land plus one building: off by a median ${apPct(bt.withBuilding.medianError)} (${bt.withBuilding.n.toLocaleString()} sales).` : null,
-    d.stats.usd ? `USD prices are a separate market: the property market prices UPX at about ${d.stats.usd.upxPerUsd.toLocaleString()} per $1 (bare land, 90 days), not the store's 1,000, and USD asks are converted at that rate.` : null,
-    'A sale under 1 UPX is a transfer, not a price, and is left out everywhere.',
-  ].filter(Boolean).join('<br>');
   $('ap-results').classList.remove('hidden');
 }
 
