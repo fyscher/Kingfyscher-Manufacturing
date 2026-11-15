@@ -283,6 +283,55 @@ function decodeOfferEvents(t3Deltas) {
   });
 }
 
+/** Upland handing a new NFT to its first owner ("is the initial owner", "owns the NFT"). */
+const isStoreDelivery = data => data?.from === "playuplandme" && /is the initial owner|owns the NFT/.test(data.memo || "");
+
+/** A UPX payment to playuplandme with no memo: what a store purchase looks like (among many other things). */
+const isStorePayment = data => data?.to === "playuplandme" && !data.memo;
+
+// A UPX store purchase is two transactions (verified 2026-11-14 on 68 of
+// Fyscher's own purchases): the buyer pays playuplandme with an empty memo, then
+// ~1-1.5 s later playuplandme hands over the NFT. Most handouts have no payment
+// before them at all (packs, giveaways, card purchases: 33 of 402 paired in a
+// sample hour), and most empty-memo payments buy something else (1,661 that hour).
+const STORE_PAIR_MS = 5_000;
+
+/**
+ * Pair each store handout with the same buyer's empty-memo UPX payment to
+ * playuplandme up to 5 seconds before it: the closest one, each payment used
+ * once. One row per NFT; a handout of several NFTs splits the payment evenly.
+ */
+function decodeStoreSales(paymentRows, transferRows) {
+  const byBuyer = new Map();
+  for (const p of paymentRows) {
+    const amount = parseAsset(p.data.quantity);
+    if (!isStorePayment(p.data) || amount?.symbol !== "UPX") continue;
+    if (!byBuyer.has(p.data.from)) byBuyer.set(p.data.from, []);
+    byBuyer.get(p.data.from).push({ seq: p.global_sequence, ms: Date.parse(p.ts), amount: amount.amount });
+  }
+  const used = new Set();
+  const rows = [];
+  for (const t of transferRows) {
+    const ids = t.data.dgood_ids || [];
+    if (!isStoreDelivery(t.data) || !ids.length) continue;
+    const ms = Date.parse(t.ts);
+    let best = null;
+    for (const p of byBuyer.get(t.data.to) || []) {
+      if (used.has(p.seq) || p.ms > ms || ms - p.ms > STORE_PAIR_MS) continue;
+      if (!best || p.ms > best.ms) best = p;
+    }
+    if (!best) continue;
+    used.add(best.seq);
+    for (const id of ids) {
+      rows.push({
+        dgood_id: Number(id), delivery_seq: t.global_sequence, payment_seq: best.seq, ts: t.ts,
+        buyer: t.data.to, price: round2(best.amount / ids.length),
+      });
+    }
+  }
+  return rows;
+}
+
 module.exports = {
   parseAsset,
   chainTimeIso,
@@ -302,4 +351,8 @@ module.exports = {
   decodePropertySalesUsd,
   decodeListingEvents,
   decodeOfferEvents,
+  isStoreDelivery,
+  isStorePayment,
+  STORE_PAIR_MS,
+  decodeStoreSales,
 };

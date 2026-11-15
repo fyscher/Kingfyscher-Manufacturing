@@ -160,6 +160,13 @@ CREATE TABLE IF NOT EXISTS construction_contracts (
   builder TEXT, price REAL, fee REAL, fetched_at TEXT NOT NULL
 );
 
+-- UPX store purchases (decodeStoreSales): the buyer's payment to playuplandme paired with
+-- the NFT handed over ~1 s later. Design from nft_items (enrichStoreSales; '' = untracked).
+CREATE TABLE IF NOT EXISTS store_sales (
+  dgood_id INTEGER PRIMARY KEY, delivery_seq TEXT NOT NULL, payment_seq TEXT NOT NULL, ts TEXT NOT NULL,
+  buyer TEXT, price REAL NOT NULL, category TEXT, token_name TEXT
+);
+
 -- Figures the appraiser shows next to its numbers (back-test, USD rate, decor effect), as JSON.
 CREATE TABLE IF NOT EXISTS appraisal_stats (key TEXT PRIMARY KEY, value TEXT NOT NULL, refreshed_at TEXT NOT NULL);
 
@@ -207,6 +214,8 @@ CREATE INDEX IF NOT EXISTS properties_address ON properties (address);
 CREATE INDEX IF NOT EXISTS contracts_ts ON construction_contracts (ts);
 CREATE INDEX IF NOT EXISTS nft_sales_design ON nft_sales (dg_category, dg_token, ts);
 CREATE INDEX IF NOT EXISTS nft_sales_ts ON nft_sales (ts);
+CREATE INDEX IF NOT EXISTS store_sales_design ON store_sales (category, token_name, ts);
+CREATE INDEX IF NOT EXISTS store_sales_payment ON store_sales (payment_seq);
 `;
 
 function openDb(file) {
@@ -286,7 +295,7 @@ function setCheckpoint(db, feed, doneUntil) {
 
 function stats(db) {
   const tables = ["raw_actions", "raw_deltas", "nft_sales", "property_sales", "property_listing_events",
-    "property_offer_events", "designs", "design_names", "nft_items", "nft_escrow_events", "market_designs", "property_buildings"];
+    "property_offer_events", "designs", "design_names", "nft_items", "nft_escrow_events", "market_designs", "property_buildings", "store_sales"];
   const counts = Object.fromEntries(tables.map(t => [t, db.prepare(`SELECT COUNT(*) AS n FROM ${t}`).get().n]));
   const checkpoints = db.prepare("SELECT feed, done_until FROM sync_state ORDER BY feed").all();
   return { counts, checkpoints };

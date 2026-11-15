@@ -389,10 +389,26 @@ const NOT_MAP_ASSETS = new Set(["structure"]); // a building's own NFT is the bu
 const OVERPAY_MULTIPLE = 4;
 
 /**
+ * What the Upland store charges in UPX for one design (store_sales): the most
+ * common price among its newest 50 store purchases, dated by the newest of
+ * them. A store price is fixed per design (one price for 18 of 19 designs in a
+ * sample hour), so a payment paired with the wrong handout can't outvote it.
+ */
+function designStorePrice(db, category, token) {
+  const rows = db.prepare("SELECT price, ts FROM store_sales WHERE category = ? AND token_name = ? ORDER BY ts DESC LIMIT 50").all(category, token);
+  if (!rows.length) return null;
+  const counts = new Map();
+  for (const r of rows) counts.set(r.price, (counts.get(r.price) || 0) + 1);
+  const most = Math.max(...counts.values());
+  return rows.find(r => counts.get(r.price) === most);
+}
+
+/**
  * The newest real sale of one map asset design, at the seller's price. A 1-UPX
  * sale is a gift, and so is one under a quarter of the median once there are 3
  * real sales (the same rule as the map asset browser, nfts.js); one over 4x the
- * median is skipped the same way.
+ * median is skipped the same way. A design nobody has resold falls back to its
+ * store price (Fyscher, 2026-11-14): buying it from the store is a sale too.
  */
 function designLastSale(db, category, token) {
   const d = db.prepare("SELECT display_name FROM market_designs WHERE category = ? AND token_name = ?").get(category, token);
@@ -400,7 +416,9 @@ function designLastSale(db, category, token) {
     .all(category, token, TOKEN_PRICE);
   const ref = all.length >= 3 ? quantile(sortNum(all.map(s => s.price)), 0.5) : null;
   const last = all.find(s => ref == null || (s.price >= ref * GIFT_SHARE && s.price <= ref * OVERPAY_MULTIPLE)) || null;
-  return { name: d?.display_name || token, lastPrice: last?.price ?? null, lastSaleAt: last?.ts ?? null };
+  const store = last ? null : designStorePrice(db, category, token);
+  const pick = last || store;
+  return { name: d?.display_name || token, lastPrice: pick?.price ?? null, lastSaleAt: pick?.ts ?? null, priceFrom: last ? "resale" : store ? "store" : null };
 }
 
 /**
@@ -544,5 +562,5 @@ function appraiseProperty(db, propertyId, { picks = [] } = {}) {
 
 module.exports = {
   quantile, weightedQuantile, medianBand, ringsAround, landRatio, landIndex, between,
-  rebuildAppraisalSales, buildRules, refreshAppraisal, fillSaleBundles, designLastSale, placedRecord, appraiseProperty, MIN_COMPS,
+  rebuildAppraisalSales, buildRules, refreshAppraisal, fillSaleBundles, designLastSale, designStorePrice, placedRecord, appraiseProperty, MIN_COMPS,
 };
