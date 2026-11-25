@@ -199,6 +199,32 @@ describe("indexer client", () => {
     assert.ok(clock.sleeps.includes(5000));
   });
 
+  test("a connection dropped while the body downloads is retried, not fatal (2026-11-14)", async () => {
+    const clock = fakeClock();
+    let calls = 0;
+    const dropped = { ...jsonResponse({}), json: async () => { throw new TypeError("terminated: other side closed"); } };
+    const client = createClient({
+      historyUrl: "https://h", rpcUrl: "https://r", requestsPerSecond: 10, userAgent: "kfm-test/1",
+      fetchImpl: async () => (++calls === 1 ? dropped : jsonResponse({ actions: [1] })),
+      sleep: clock.sleep, now: clock.now,
+    });
+    const res = await client.getActions({ filter: "a:b" });
+    assert.deepStrictEqual([res.actions, calls], [[1], 2]);
+    assert.ok(clock.sleeps.includes(2000), "backed off before the retry");
+  });
+
+  test("a body that keeps failing still gives up after the last attempt", async () => {
+    const clock = fakeClock();
+    let calls = 0;
+    const client = createClient({
+      historyUrl: "https://h", rpcUrl: "https://r", requestsPerSecond: 10, userAgent: "kfm-test/1",
+      fetchImpl: async () => { calls++; return { ...jsonResponse({}), json: async () => { throw new TypeError("terminated"); } }; },
+      sleep: clock.sleep, now: clock.now,
+    });
+    await assert.rejects(() => client.getActions({ filter: "a:b" }), /terminated/);
+    assert.strictEqual(calls, 6);
+  });
+
   test("refuses to run without a User-Agent", () => {
     assert.throws(() => createClient({ historyUrl: "h", rpcUrl: "r" }), /userAgent/);
   });
