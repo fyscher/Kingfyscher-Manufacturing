@@ -112,19 +112,23 @@ describe("GET /api/upland/market", () => {
     assert.deepStrictEqual([bench.listed, bench.escrow, bench.sales_30d, bench.median_30d, bench.floor_30d, bench.last_price], [2, 5, 3, 120, 100, 120]);
   });
 
-  test("one design: weekly candles start on Mondays (the charts' default)", async () => {
+  test("one design: chart series per day, week (from Mondays) and month (from the 1st), with stats per period", async () => {
     const r = await get("/api/upland/market/asset/outdoordecor/bench").expect(200);
     // The two sales 20 days ago and the one 3 days ago always fall in different weeks.
-    assert.deepStrictEqual(r.body.weeklyCandles.map(c => [c.open, c.high, c.low, c.close, c.volume]), [[100, 140, 100, 140, 2], [120, 120, 120, 120, 1]]);
-    for (const c of r.body.weeklyCandles) assert.strictEqual(new Date(`${c.day}T00:00:00Z`).getUTCDay(), 1, `${c.day} is a Monday`);
+    assert.deepStrictEqual(r.body.series.week.map(p => [p.open, p.high, p.low, p.close, p.median, p.volume]), [[100, 140, 100, 140, 120, 2], [120, 120, 120, 120, 120, 1]]);
+    for (const p of r.body.series.week) assert.strictEqual(new Date(`${p.time}T00:00:00Z`).getUTCDay(), 1, `${p.time} is a Monday`);
+    for (const p of r.body.series.month) assert.ok(p.time.endsWith("-01"), `${p.time} is the 1st`);
+    assert.strictEqual(r.body.series.month.reduce((n, p) => n + p.volume, 0), 3);
+    assert.strictEqual(r.body.outliers, 0, "three sales in a tight range: nothing to leave out");
+    assert.deepStrictEqual([r.body.stats[0], r.body.stats[365]], [{ trades: 3, avg: 120, min: 100, max: 140 }, { trades: 3, avg: 120, min: 100, max: 140 }]);
   });
 
-  test("one design: listings with seller and time, other escrow, sales and daily candles", async () => {
+  test("one design: listings with seller and time, other escrow, sales and daily points", async () => {
     const r = await get("/api/upland/market/asset/outdoordecor/bench").expect(200);
     assert.deepStrictEqual(r.body.listed.map(i => [i.serial, i.seller]), [[1, "alice"], [2, "bob"]], "newest listing first");
     assert.deepStrictEqual(r.body.otherEscrow.map(i => [i.serial, i.kind, i.address]), [[6, "bundle", "131 FRANKLIN ST"], [3, "other", null], [4, null, null]]);
     assert.deepStrictEqual(r.body.sales.map(s => s.price), [120, 140, 100], "newest first, at the seller's price");
-    assert.deepStrictEqual(r.body.candles.map(c => [c.open, c.high, c.low, c.close, c.volume]), [[100, 140, 100, 140, 2], [120, 120, 120, 120, 1]]);
+    assert.deepStrictEqual(r.body.series.day.map(c => [c.open, c.high, c.low, c.close, c.volume]), [[100, 140, 100, 140, 2], [120, 120, 120, 120, 1]]);
     assert.strictEqual(r.body.design.categoryLabel, "Outdoor Decor");
     assert.deepStrictEqual(r.body.stats[7], { trades: 1, avg: 120, min: 120, max: 120 });
     assert.deepStrictEqual(r.body.stats[30], { trades: 3, avg: 120, min: 100, max: 140 });

@@ -1068,7 +1068,7 @@ document.querySelector('.nav-item[data-section="buildcalc"]').addEventListener('
 });
 
 /* ── Map Assets: State ───────────────────────────────────── */
-const maState = { chart: null, chartResizeObs: null, asset: null };
+const maState = { chart: null, asset: null }; // chart: the PriceChart handle
 
 /* ── Map Assets: Helpers ─────────────────────────────────── */
 function maFmtUpx(n) {
@@ -1166,48 +1166,18 @@ function maOpenFromUrl() {
 
 /* ── Map Assets: Chart lifecycle ────────────────────────── */
 function destroyMaChart() {
-  if (maState.chartResizeObs) { maState.chartResizeObs.disconnect(); maState.chartResizeObs = null; }
   if (maState.chart) { maState.chart.remove(); maState.chart = null; }
 }
 
-function buildMaChart(candles) {
+function buildMaChart(points, view) {
   destroyMaChart();
-  const container   = $('ma-chart-container');
   const placeholder = $('ma-chart-placeholder');
-
-  if (!candles || candles.length === 0) {
+  if (!points.length) {
     placeholder.style.display = 'flex';
     return;
   }
   placeholder.style.display = 'none';
-
-  const chart = LightweightCharts.createChart(container, {
-    width:  container.offsetWidth,
-    height: 300,
-    layout: { background: { color: '#111120' }, textColor: '#94a3b8' },
-    grid:   { vertLines: { color: '#1c1c30' }, horzLines: { color: '#1c1c30' } },
-    rightPriceScale: { borderColor: '#1c1c30' },
-    timeScale:       { borderColor: '#1c1c30', timeVisible: false },
-    crosshair: { mode: 1 },
-  });
-
-  const series = chart.addCandlestickSeries({
-    upColor:         '#10b981',
-    downColor:       '#ef4444',
-    borderUpColor:   '#10b981',
-    borderDownColor: '#ef4444',
-    wickUpColor:     '#10b981',
-    wickDownColor:   '#ef4444',
-  });
-
-  series.setData(candles);
-  chart.timeScale().fitContent();
-
-  const obs = new ResizeObserver(() => chart.applyOptions({ width: container.offsetWidth }));
-  obs.observe(container);
-
-  maState.chart = chart;
-  maState.chartResizeObs = obs;
+  maState.chart = PriceChart.draw($('ma-chart-container'), points, { view, height: 300, background: '#111120' });
 }
 
 function maShowCoverage(afterEl, text) {
@@ -1221,21 +1191,17 @@ function maShowCoverage(afterEl, text) {
   el.textContent = text || '';
 }
 
-// The Monday (UTC) of a "YYYY-MM-DD" day, where weekly candles start (utils/candles.js).
-function maWeekStart(day) {
-  const d = new Date(`${day}T00:00:00Z`);
-  d.setUTCDate(d.getUTCDate() - ((d.getUTCDay() + 6) % 7));
-  return d.toISOString().slice(0, 10);
-}
+const MA_PERIODS = { 30: 'last 30 days', 90: 'last 90 days', 182: 'last 6 months', 365: 'last year', 0: 'all history' };
 
 /* ── Map Assets: Load chart for the chosen asset ─────────────
-   Weekly candles by default (daily on request) of what sellers received, from
-   the indexer (1 UPX giveaways left out), cut to the chosen period: whole
-   weeks, so the first can start up to 6 days before it. */
+   The weekly median by default (candles, daily or monthly on request) of what
+   sellers received, from the indexer, cut to the chosen period in whole periods.
+   Gifts, dumps and one-off trades are left out (utils/priceSeries.js). */
 async function loadMaChart() {
   const asset = maState.asset;
-  const days  = Number($('ma-period').value);
-  const weekly = $('ma-interval').value === 'week';
+  const days = Number($('ma-period').value);
+  const interval = $('ma-interval').value;
+  const view = $('ma-view').value;
   if (!asset) return;
 
   const placeholder = $('ma-chart-placeholder');
@@ -1256,23 +1222,24 @@ async function loadMaChart() {
     if (asset !== maState.asset) return; // another asset was chosen meanwhile
     const name = data.design.display_name || data.design.token_name;
     if (!maSearch.value) maSearch.value = name;
-    const since = new Date(Date.now() - days * 86_400_000).toISOString().slice(0, 10);
-    const candles = weekly ? data.weeklyCandles.filter(c => c.day >= maWeekStart(since)) : data.candles.filter(c => c.day >= since);
-    buildMaChart(candles.map(c => ({ time: c.day, open: c.open, high: c.high, low: c.low, close: c.close })));
+    buildMaChart(PriceChart.within(data.series[interval], interval, days), view);
 
     const st = data.stats[days] || { trades: 0 };
     const history = data.salesFrom ? `Sales history since ${new Date(data.salesFrom).toLocaleDateString(undefined, { dateStyle: 'medium' })}` : '';
-    const gifts = data.giveaways ? `; ${data.giveaways} giveaway sale${data.giveaways > 1 ? 's' : ''} at 1 UPX left out` : '';
+    const left = [
+      data.giveaways ? `${data.giveaways} giveaway sale${data.giveaways > 1 ? 's' : ''} at 1 UPX` : null,
+      data.outliers ? `${data.outliers} sale${data.outliers > 1 ? 's' : ''} far off the price around them (gifts, dumps, one-off trades)` : null,
+    ].filter(Boolean);
     if (st.trades > 0) {
       $('ma-stat-avg').textContent    = maFmtUpx(st.avg);
       $('ma-stat-min').textContent    = maFmtUpx(st.min);
       $('ma-stat-max').textContent    = maFmtUpx(st.max);
       $('ma-stat-trades').textContent = st.trades;
       chartStats.classList.remove('hidden');
-      maShowCoverage(chartStats, `${name}, last ${days} days, ${weekly ? 'weekly candles (Monday to Sunday, UTC)' : 'daily candles'}. ${history}${gifts}.`);
+      maShowCoverage(chartStats, `${name}, ${MA_PERIODS[days]}. ${PriceChart.describe(view, interval)} ${history}${left.length ? `; left out: ${left.join(' and ')}` : ''}.`);
     } else {
       placeholder.style.display = 'flex';
-      chartMsg.textContent      = `No sales of "${name}" in the last ${days} days. ${history}.`;
+      chartMsg.textContent      = `No sales of "${name}" in the ${MA_PERIODS[days]}. ${history}.`;
     }
   } catch (err) {
     placeholder.style.display = 'flex';
@@ -1283,6 +1250,7 @@ async function loadMaChart() {
 /* ── Map Assets: Chart controls ─────────────────────────── */
 $('ma-period').addEventListener('change', loadMaChart);
 $('ma-interval').addEventListener('change', loadMaChart);
+$('ma-view').addEventListener('change', loadMaChart);
 $('map-assets-refresh').addEventListener('click', () => { if (maState.asset) loadMaChart(); });
 
 /* ── Collection Optimizer ───────────────────────────────── */

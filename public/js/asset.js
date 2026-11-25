@@ -3,59 +3,47 @@ const params = new URLSearchParams(location.search);
 const category = params.get('c') || '';
 const tokenName = params.get('t') || '';
 
-// Weekly candles by default (Fyscher, 2026-11-24); the toggle switches to daily.
-const chartView = { interval: 'week', data: null, chart: null, obs: null };
+// The weekly median over all history by default (Fyscher, 2026-11-24); the
+// buttons switch to candles, daily or monthly points, and a shorter period.
+const chartView = { view: 'median', interval: 'week', range: 0, data: null, handle: null };
 
-function drawChart(candles) {
+function drawChart(points) {
   const el = mk.$('as-chart');
-  if (chartView.chart) {
-    chartView.obs.disconnect();
-    chartView.chart.remove();
-    chartView.chart = null;
+  if (chartView.handle) {
+    chartView.handle.remove();
+    chartView.handle = null;
   }
   el.innerHTML = '';
   el.style.minHeight = '';
-  if (!candles.length || typeof LightweightCharts === 'undefined') {
-    el.innerHTML = '<p class="market-note" style="padding:2rem 0;text-align:center">No sales in the history we have yet.</p>';
+  if (!points.length || typeof LightweightCharts === 'undefined') {
+    el.innerHTML = '<p class="market-note" style="padding:2rem 0;text-align:center">No sales in this period of the history we have.</p>';
     el.style.minHeight = '0';
     return;
   }
-  const chart = LightweightCharts.createChart(el, {
-    height: 340,
-    layout: { background: { color: 'transparent' }, textColor: '#94a3b8' },
-    grid: { vertLines: { color: '#1c1c30' }, horzLines: { color: '#1c1c30' } },
-    rightPriceScale: { borderColor: '#1c1c30' },
-    timeScale: { borderColor: '#1c1c30' },
-  });
-  const series = chart.addCandlestickSeries({
-    upColor: '#10b981', downColor: '#ef4444', borderVisible: false, wickUpColor: '#10b981', wickDownColor: '#ef4444',
-  });
-  series.setData(candles.map(c => ({ time: c.day, open: c.open, high: c.high, low: c.low, close: c.close })));
-  const volume = chart.addHistogramSeries({ priceScaleId: 'vol', color: 'rgba(124, 58, 237, 0.35)', priceFormat: { type: 'volume' } });
-  chart.priceScale('vol').applyOptions({ scaleMargins: { top: 0.8, bottom: 0 } });
-  volume.setData(candles.map(c => ({ time: c.day, value: c.volume })));
-  chart.timeScale().fitContent();
-  chartView.chart = chart;
-  chartView.obs = new ResizeObserver(() => chart.applyOptions({ width: el.clientWidth }));
-  chartView.obs.observe(el);
+  chartView.handle = PriceChart.draw(el, points, { view: chartView.view, height: 340 });
 }
 
 function showChart() {
   const d = chartView.data;
-  const weekly = chartView.interval === 'week';
-  const candles = weekly ? d.weeklyCandles : d.candles;
-  for (const b of document.querySelectorAll('[data-interval]')) b.classList.toggle('active', b.dataset.interval === chartView.interval);
-  mk.$('as-chart-days').textContent = `${candles.length} ${weekly ? 'week' : 'day'}${candles.length === 1 ? '' : 's'}`;
+  const { view, interval, range } = chartView;
+  const points = PriceChart.within(d.series[interval], interval, range);
+  for (const b of document.querySelectorAll('[data-chart]')) b.classList.toggle('active', String(chartView[b.dataset.chart]) === b.dataset.value);
+  mk.$('as-chart-days').textContent = PriceChart.count(points.length, interval);
+  const left = [
+    d.giveaways ? `${d.giveaways} 1 UPX giveaway${d.giveaways === 1 ? '' : 's'}` : null,
+    d.outliers ? `${d.outliers} sale${d.outliers === 1 ? '' : 's'} far off the price around ${d.outliers === 1 ? 'it' : 'them'} (gifts, dumps, one-off trades)` : null,
+  ].filter(Boolean);
   mk.$('as-chart-note').textContent = d.salesFrom
-    ? `${weekly ? 'Weekly (Monday to Sunday, UTC)' : 'Daily'} open, high, low and close of what sellers received, with the number of sales underneath (1 UPX giveaways left out). History starts ${mk.day(d.salesFrom)}.`
+    ? `${PriceChart.describe(view, interval)}${left.length ? ` Left out: ${left.join(' and ')}.` : ''} History starts ${mk.day(d.salesFrom)}.`
     : '';
-  drawChart(candles);
+  drawChart(points);
 }
 
-for (const b of document.querySelectorAll('[data-interval]')) {
+for (const b of document.querySelectorAll('[data-chart]')) {
   b.addEventListener('click', () => {
-    if (!chartView.data || chartView.interval === b.dataset.interval) return;
-    chartView.interval = b.dataset.interval;
+    if (!chartView.data) return;
+    const key = b.dataset.chart;
+    chartView[key] = key === 'range' ? Number(b.dataset.value) : b.dataset.value;
     showChart();
   });
 }

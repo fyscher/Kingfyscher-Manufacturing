@@ -4,7 +4,7 @@
 // sale prices: what sellers received (p141 - p142).
 const marketRouter = require("express").Router();
 const { indexerDb } = require("../../utils/indexerDb");
-const { dailyCandles, weeklyCandles } = require("../../utils/candles");
+const { withoutOutliers, priceSeries } = require("../../utils/priceSeries");
 const { userExtractor } = require("../../middleware");
 
 // Signed-in only: the asset page names the chain accounts behind listings, and
@@ -131,27 +131,30 @@ marketRouter.get("/asset/:category/:token", (req, res) => {
 
   const sales = db.prepare(`SELECT ts, price, buyer_paid AS buyerPaid, mint AS serial FROM nft_sales
     WHERE dg_category = ? AND dg_token = ? AND price IS NOT NULL ORDER BY ts DESC`).all(category, token);
-  // 1 UPX is a giveaway price, never a market price (see indexer/nfts.js), so the
-  // chart and the stats leave those out; the sales list still shows them.
+  // 1 UPX is a giveaway price, never a market price (see indexer/nfts.js), and
+  // gifts, dumps and one-off trades far off the price around them aren't either
+  // (utils/priceSeries.js): the chart and the stats leave them out; the sales list
+  // still shows every sale.
   const real = sales.filter(s => s.price > 1);
-  const stats = Object.fromEntries([7, 30, 90].map(days => {
-    const since = new Date(Date.now() - days * 86_400_000).toISOString();
-    const xs = real.filter(s => s.ts >= since).map(s => s.price);
+  const { kept, excluded } = withoutOutliers(real);
+  // Per chart range in days (0 = all history).
+  const stats = Object.fromEntries([7, 30, 90, 182, 365, 0].map(days => {
+    const since = days ? new Date(Date.now() - days * 86_400_000).toISOString() : "";
+    const xs = kept.filter(s => s.ts >= since).map(s => s.price);
     return [days, xs.length
       ? { trades: xs.length, avg: Math.round((xs.reduce((a, b) => a + b, 0) / xs.length) * 100) / 100, min: Math.min(...xs), max: Math.max(...xs) }
       : { trades: 0 }];
   }));
 
-  const daily = dailyCandles(real);
   res.json({
     design: { ...design, categoryLabel: CATEGORY_LABELS[design.category] || design.category },
     listed: inEscrow.filter(i => i.kind === "listing"),
     otherEscrow: inEscrow.filter(i => i.kind !== "listing"),
     sales: sales.slice(0, 300),
-    candles: daily,
-    weeklyCandles: weeklyCandles(daily),
+    series: Object.fromEntries(["day", "week", "month"].map(i => [i, priceSeries(kept, i)])),
     stats,
     giveaways: sales.length - real.length,
+    outliers: excluded,
     ...freshness(db),
   });
 });
