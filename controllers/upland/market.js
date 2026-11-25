@@ -4,7 +4,7 @@
 // sale prices: what sellers received (p141 - p142).
 const marketRouter = require("express").Router();
 const { indexerDb } = require("../../utils/indexerDb");
-const { withoutOutliers, priceSeries } = require("../../utils/priceSeries");
+const { withoutOutliers, priceSeries, listedOverTime } = require("../../utils/priceSeries");
 const { userExtractor } = require("../../middleware");
 
 // Signed-in only: the asset page names the chain accounts behind listings, and
@@ -146,12 +146,19 @@ marketRouter.get("/asset/:category/:token", (req, res) => {
       : { trades: 0 }];
   }));
 
+  // Every escrow move of this design's NFTs, for how many were listed over time.
+  const moves = db.prepare(`SELECT e.ts, e.dgood_id, e.direction, e.kind FROM nft_items i
+    JOIN nft_escrow_events e ON e.dgood_id = i.id
+    WHERE i.category = ? AND i.token_name = ? ORDER BY e.block_num, e.global_sequence`).all(category, token);
+
   res.json({
     design: { ...design, categoryLabel: CATEGORY_LABELS[design.category] || design.category },
     listed: inEscrow.filter(i => i.kind === "listing"),
     otherEscrow: inEscrow.filter(i => i.kind !== "listing"),
     sales: sales.slice(0, 300),
     series: Object.fromEntries(["day", "week", "month"].map(i => [i, priceSeries(kept, i)])),
+    listedSeries: Object.fromEntries(["day", "week", "month"].map(i => [i, listedOverTime(moves, i)])),
+    listedFrom: db.prepare("SELECT MIN(ts) AS t FROM nft_escrow_events").get().t,
     stats,
     giveaways: sales.length - real.length,
     outliers: excluded,

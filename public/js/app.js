@@ -1169,7 +1169,7 @@ function destroyMaChart() {
   if (maState.chart) { maState.chart.remove(); maState.chart = null; }
 }
 
-function buildMaChart(points, view) {
+function buildMaChart(points, view, interval, listed) {
   destroyMaChart();
   const placeholder = $('ma-chart-placeholder');
   if (!points.length) {
@@ -1177,7 +1177,7 @@ function buildMaChart(points, view) {
     return;
   }
   placeholder.style.display = 'none';
-  maState.chart = PriceChart.draw($('ma-chart-container'), points, { view, height: 300, background: '#111120' });
+  maState.chart = PriceChart.draw($('ma-chart-container'), points, { view, interval, listed, height: 300, background: '#111120' });
 }
 
 function maShowCoverage(afterEl, text) {
@@ -1222,7 +1222,7 @@ async function loadMaChart() {
     if (asset !== maState.asset) return; // another asset was chosen meanwhile
     const name = data.design.display_name || data.design.token_name;
     if (!maSearch.value) maSearch.value = name;
-    buildMaChart(PriceChart.within(data.series[interval], interval, days), view);
+    buildMaChart(PriceChart.within(data.series[interval], interval, days), view, interval, PriceChart.within(data.listedSeries[interval], interval, days));
 
     const st = data.stats[days] || { trades: 0 };
     const history = data.salesFrom ? `Sales history since ${new Date(data.salesFrom).toLocaleDateString(undefined, { dateStyle: 'medium' })}` : '';
@@ -1236,7 +1236,7 @@ async function loadMaChart() {
       $('ma-stat-max').textContent    = maFmtUpx(st.max);
       $('ma-stat-trades').textContent = st.trades;
       chartStats.classList.remove('hidden');
-      maShowCoverage(chartStats, `${name}, ${MA_PERIODS[days]}. ${PriceChart.describe(view, interval)} ${history}${left.length ? `; left out: ${left.join(' and ')}` : ''}.`);
+      maShowCoverage(chartStats, `${name}, ${MA_PERIODS[days]}. ${PriceChart.describe(view, interval)} ${history}${left.length ? `; left out: ${left.join(' and ')}` : ''}${data.listedFrom ? `. Listings made before ${new Date(data.listedFrom).toLocaleDateString(undefined, { dateStyle: 'medium' })} aren't seen, so the for-sale line can start low` : ''}.`);
     } else {
       placeholder.style.display = 'flex';
       chartMsg.textContent      = `No sales of "${name}" in the ${MA_PERIODS[days]}. ${history}.`;

@@ -121,6 +121,13 @@ describe("GET /api/upland/market", () => {
     assert.strictEqual(r.body.series.month.reduce((n, p) => n + p.volume, 0), 3);
     assert.strictEqual(r.body.outliers, 0, "three sales in a tight range: nothing to leave out");
     assert.deepStrictEqual([r.body.stats[0], r.body.stats[365]], [{ trades: 3, avg: 120, min: 100, max: 140 }, { trades: 3, avg: 120, min: 100, max: 140 }]);
+    // Escrow moves: serial 3 listed 9 days ago and delisted a day later, then 2 (5 days ago) and 1 (2 days ago)
+    // listed; serial 6 went in with a property listing (not for sale on its own). Listed now: 2.
+    const daily = r.body.listedSeries.day;
+    assert.deepStrictEqual([daily[0].listed, daily[1].listed, daily[daily.length - 1].listed], [1, 0, 2]);
+    assert.strictEqual(r.body.listedSeries.week[r.body.listedSeries.week.length - 1].listed, 2);
+    assert.strictEqual(r.body.listed.length, 2, "the serials for sale now are still there");
+    assert.ok(r.body.listedFrom, "when the escrow history starts");
   });
 
   test("one design: listings with seller and time, other escrow, sales and daily points", async () => {

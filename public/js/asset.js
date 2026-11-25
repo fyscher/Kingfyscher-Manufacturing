@@ -7,7 +7,7 @@ const tokenName = params.get('t') || '';
 // buttons switch to candles, daily or monthly points, and a shorter period.
 const chartView = { view: 'median', interval: 'week', range: 0, data: null, handle: null };
 
-function drawChart(points) {
+function drawChart(points, listed) {
   const el = mk.$('as-chart');
   if (chartView.handle) {
     chartView.handle.remove();
@@ -20,7 +20,7 @@ function drawChart(points) {
     el.style.minHeight = '0';
     return;
   }
-  chartView.handle = PriceChart.draw(el, points, { view: chartView.view, height: 340 });
+  chartView.handle = PriceChart.draw(el, points, { view: chartView.view, interval: chartView.interval, listed, height: 340 });
 }
 
 function showChart() {
@@ -34,9 +34,9 @@ function showChart() {
     d.outliers ? `${d.outliers} sale${d.outliers === 1 ? '' : 's'} far off the price around ${d.outliers === 1 ? 'it' : 'them'} (gifts, dumps, one-off trades)` : null,
   ].filter(Boolean);
   mk.$('as-chart-note').textContent = d.salesFrom
-    ? `${PriceChart.describe(view, interval)}${left.length ? ` Left out: ${left.join(' and ')}.` : ''} History starts ${mk.day(d.salesFrom)}.`
+    ? `${PriceChart.describe(view, interval)}${left.length ? ` Left out: ${left.join(' and ')}.` : ''} Sales history starts ${mk.day(d.salesFrom)}${d.listedFrom ? `; listings made before ${mk.day(d.listedFrom)} aren't seen, so the for-sale line can start low` : ''}.`
     : '';
-  drawChart(points);
+  drawChart(points, PriceChart.within(d.listedSeries[interval], interval, range));
 }
 
 for (const b of document.querySelectorAll('[data-chart]')) {
