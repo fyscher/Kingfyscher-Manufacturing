@@ -43,12 +43,15 @@ function createClient({
           headers: { "User-Agent": userAgent, ...(init.headers || {}) },
           signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
         });
+        // Reading the body is part of the request: a connection dropped mid-download
+        // ("other side closed", 2026-11-14, 28 MB in) killed a backfill when this
+        // sat outside the retry.
+        if (res.ok) return await res.json();
       } catch (err) {
         if (attempt >= MAX_ATTEMPTS) throw err;
         await sleep(backoffMs(attempt));
         continue;
       }
-      if (res.ok) return res.json();
 
       const retryable = res.status === 429 || res.status >= 500;
       if (!retryable || attempt >= MAX_ATTEMPTS) {
