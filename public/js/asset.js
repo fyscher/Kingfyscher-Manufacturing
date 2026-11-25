@@ -30,7 +30,7 @@ function showChart() {
   for (const b of document.querySelectorAll('[data-chart]')) b.classList.toggle('active', String(chartView[b.dataset.chart]) === b.dataset.value);
   mk.$('as-chart-days').textContent = PriceChart.count(points.length, interval);
   const left = [
-    d.giveaways ? `${d.giveaways} 1 UPX giveaway${d.giveaways === 1 ? '' : 's'}` : null,
+    d.giveaways ? `${d.giveaways} giveaway${d.giveaways === 1 ? '' : 's'} at 1 UPX` : null,
     d.outliers ? `${d.outliers} sale${d.outliers === 1 ? '' : 's'} far off the price around ${d.outliers === 1 ? 'it' : 'them'} (gifts, dumps, one-off trades)` : null,
   ].filter(Boolean);
   mk.$('as-chart-note').textContent = d.salesFrom
