@@ -10,6 +10,7 @@ const {
   decodePropertySalesUsd,
   decodeListingEvents,
   decodeOfferEvents,
+  decodeStoreSales,
 } = require("../indexer/decode");
 const { createClient } = require("../indexer/hyperion");
 const { openDb, getCheckpoint } = require("../indexer/db");
@@ -126,6 +127,33 @@ describe("indexer decoders", () => {
     assert.deepStrictEqual([l.price_upx, l.price_fiat, l.flags, l.present], [12957, 0, "010", 1]);
     assert.deepStrictEqual([o.price, o.currency, o.offerer, o.property_id], [70000, "UPX", "offerer55555", "77333991839601"]);
   });
+
+  test("a store handout pairs with its buyer's empty-memo UPX payment up to 5 s before it", () => {
+    const at = s => `2026-10-15T23:10:${String(s).padStart(2, "0")}.000`;
+    const pay = (seq, s, from, quantity, memo = "") => raw(action(seq, `tp${seq}`, 500 + s, at(s), "upxtokenacct", "transfer", { from, to: "playuplandme", quantity, memo }));
+    const hand = (seq, s, to, ids) => raw(action(seq, `th${seq}`, 500 + s, at(s), "uplandnftact", "transfernft", {
+      from: "playuplandme", to, dgood_ids: ids,
+      memo: `This transaction notarises that Upland user someone with corresponding EOS account ${to} is the initial owner of the NFT "Fence" mint 1.`,
+    }));
+    const payments = [
+      pay(1, 0, "buyer1111111", "75.00 UPX"), // pays, gets one fence 1.5 s later (the real gap)
+      pay(2, 0, "buyer1111111", "90.00 UPX", "n5"), // has a memo: something else
+      pay(3, 10, "buyer2222222", "25.00 UPX"), // 6 s before the handout: too early
+      pay(4, 20, "buyer3333333", "50.00 UPX"), // two NFTs in one handout
+      pay(5, 31, "buyer4444444", "60.00 UPX"), // after the handout
+      pay(6, 40, "buyer5555555", "5.00 SPARKLT"), // not UPX
+    ];
+    const handouts = [
+      { ...hand(11, 1, "buyer1111111", ["100"]), ts: "2026-10-15T23:10:01.500Z" },
+      hand(12, 3, "buyer1111111", ["101"]), // a second handout, but the payment is used up
+      hand(13, 16, "buyer2222222", ["200"]),
+      hand(14, 21, "buyer3333333", ["301", "302"]),
+      hand(15, 30, "buyer4444444", ["400"]),
+      hand(16, 41, "buyer5555555", ["500"]),
+    ];
+    assert.deepStrictEqual(decodeStoreSales(payments, handouts).map(r => [r.dgood_id, r.price, r.payment_seq, r.buyer]),
+      [[100, 75, "1", "buyer1111111"], [301, 25, "4", "buyer3333333"], [302, 25, "4", "buyer3333333"]]);
+  });
 });
 
 /** A fake clock: sleeping advances time instantly, and every sleep is recorded. */
@@ -198,7 +226,8 @@ function fakeHyperion({ actions = [], deltas = [] }) {
       requestCount++;
       const [account, name] = p.filter.split(":");
       const rows = actions.filter(a => a.act.account === account && a.act.name === name && inWindow(a["@timestamp"], p))
-        .filter(a => !p["@transfer.memo"] || a.act.data.memo === p["@transfer.memo"]);
+        .filter(a => !p["@transfer.memo"] || a.act.data.memo === p["@transfer.memo"])
+        .filter(a => !p["@transfer.to"] || a.act.data.to === p["@transfer.to"]);
       return { actions: page(rows, p) };
     },
     getDeltas: async p => {
@@ -251,6 +280,36 @@ describe("indexer sync", () => {
     assert.strictEqual(stored, 2, "both moves out of escrow are kept (the mint feeds the escrow tracker, not sales)");
     assert.strictEqual(getCheckpoint(db, "backfill:n112"), range.to);
     assert.strictEqual(getCheckpoint(db, "tail:n112"), null);
+    db.close();
+  });
+
+  test("store purchases: payments pair with handouts, the unpaired are pruned behind the decode, designs come from nft_items", async () => {
+    const db = openDb(":memory:");
+    setCheckpoint(db, "snapshot:nfts", "x");
+    setCheckpoint(db, "nfts:scanned_to", "500"); // NFT 900 hasn't been read yet
+    db.prepare("INSERT INTO nft_items (id, category, token_name, serial, in_escrow) VALUES (100, 'outdoordecor', 'fence', 1, 0)").run();
+    const pay = (seq, ts, from, to, quantity, memo = "") => action(seq, `tp${seq}`, seq, ts, "upxtokenacct", "transfer", { from, to, quantity, memo });
+    const hand = (seq, ts, to, id) => action(seq, `th${seq}`, seq, ts, "uplandnftact", "transfernft", {
+      from: "playuplandme", to, dgood_ids: [id], memo: `... EOS account ${to} is the initial owner of the NFT "Fence" mint 1.`,
+    });
+    const client = fakeHyperion({ actions: [
+      pay(2001, "2026-10-15T23:10:00.000", "buyer1111111", "playuplandme", "75.00 UPX"),
+      hand(2002, "2026-10-15T23:10:01.500", "buyer1111111", "100"),
+      pay(2003, "2026-10-15T23:20:00.000", "buyer2222222", "playuplandme", "75.00 UPX"),
+      hand(2004, "2026-10-15T23:20:01.000", "buyer2222222", "900"),
+      pay(2005, "2026-10-15T22:10:00.000", "buyer3333333", "playuplandme", "40.00 UPX"), // bought something else: pruned
+      pay(2006, "2026-10-15T23:55:00.000", "buyer3333333", "playuplandme", "40.00 UPX"), // too recent to judge: kept
+      pay(2007, "2026-10-15T23:30:00.000", "buyer3333333", "playuplandme", "40.00 UPX", "n5"), // has a memo: never stored
+      pay(2008, "2026-10-15T23:30:00.000", "playuplandme", "seller111111", "40.00 UPX"), // not to escrow: never fetched
+    ] });
+    await backfill({ db, client, from: "2026-10-15T22:00:00.000Z", to: "2026-10-16T00:00:00.000Z", feeds: ["nft_transfers", "store_payments"] });
+
+    assert.deepStrictEqual(db.prepare("SELECT dgood_id, price, buyer, category, token_name FROM store_sales ORDER BY dgood_id").all(), [
+      { dgood_id: 100, price: 75, buyer: "buyer1111111", category: "outdoordecor", token_name: "fence" },
+      { dgood_id: 900, price: 75, buyer: "buyer2222222", category: null, token_name: null },
+    ]);
+    assert.deepStrictEqual(db.prepare("SELECT global_sequence FROM raw_actions WHERE feed = 'store_payments' ORDER BY global_sequence").all().map(r => r.global_sequence),
+      ["2001", "2003", "2006"]);
     db.close();
   });
 });

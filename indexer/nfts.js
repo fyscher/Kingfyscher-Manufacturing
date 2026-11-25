@@ -168,6 +168,21 @@ function enrichSales(db) {
 }
 
 /**
+ * Tag each store purchase with its design, the same way. Store stock is often
+ * minted just before it's handed over, so an NFT the top-up hasn't read yet
+ * waits; once the scan is past its id and it isn't in nft_items, it's not a
+ * tracked category ('').
+ */
+function enrichStoreSales(db) {
+  const scanned = Number(getCheckpoint(db, "nfts:scanned_to"));
+  if (!getCheckpoint(db, "snapshot:nfts") || !scanned) return 0;
+  return db.prepare(`UPDATE store_sales SET
+      category = COALESCE((SELECT category FROM nft_items WHERE id = store_sales.dgood_id), ''),
+      token_name = (SELECT token_name FROM nft_items WHERE id = store_sales.dgood_id)
+    WHERE category IS NULL AND dgood_id <= ?`).run(scanned).changes;
+}
+
+/**
  * Listing a property puts the NFTs placed on it into escrow with the same empty
  * memo as an NFT listing, so they'd count as for sale though they can't be
  * bought on their own. Measured 2026-11-03: 3,767 of 9,945 "listings" over two
@@ -287,4 +302,4 @@ function refreshMarket(db, { categories = MARKET_CATEGORIES, now = Date.now() } 
   return designs.length;
 }
 
-module.exports = { MARKET_CATEGORIES, TRACKED_CATEGORIES, snapshotNfts, addNftCategories, applyEscrowEvents, topUpNfts, enrichSales, tagBundles, refreshMarket };
+module.exports = { MARKET_CATEGORIES, TRACKED_CATEGORIES, snapshotNfts, addNftCategories, applyEscrowEvents, topUpNfts, enrichSales, enrichStoreSales, tagBundles, refreshMarket };

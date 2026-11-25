@@ -237,6 +237,16 @@ describe("appraisal: what's on the property, and the property's own price", () =
     assert.deepStrictEqual([b.placed.kind, b.placed.ts, b.assets.length, b.totals.total], ["relisted empty", day(5), 0, 5000]);
   });
 
+  test("a design nobody has resold is priced at its store price: the most common of its newest store purchases", () => {
+    const db = setup();
+    const store = db.prepare("INSERT INTO store_sales (dgood_id, delivery_seq, payment_seq, ts, buyer, price, category, token_name) VALUES (?, ?, ?, ?, 'b', ?, 'outdoordecor', 'fence')");
+    [[1, 75, 3], [2, 75, 2], [3, 1, 1]].forEach(([id, price, d]) => store.run(id, `d${id}`, `p${id}`, day(d), price)); // the 1 is a mismatched pair
+    const a = appraiseProperty(db, "Q", { picks: [{ category: "outdoordecor", token: "fence", count: 3 }] });
+    assert.deepStrictEqual(a.assets.map(x => [x.token, x.lastPrice, x.lastSaleAt, x.priceFrom]),
+      [["bench", 200, day(2), "resale"], ["lamp", 80, day(3), "resale"], ["fence", 75, day(2), "store"]]);
+    assert.deepStrictEqual([a.totals.assets, a.totals.unpriced, a.totals.total], [225, 0, 5225], "the bench and lamp came with the sale");
+  });
+
   test("a USD sale is converted at the measured rate; never sold (or only given away) falls back to the mint", () => {
     const db = setup();
     db.prepare("INSERT INTO appraisal_stats (key, value, refreshed_at) VALUES ('summary', ?, 'x')").run(JSON.stringify({ usd: { upxPerUsd: 6000 } }));
