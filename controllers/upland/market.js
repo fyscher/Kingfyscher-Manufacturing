@@ -4,6 +4,7 @@
 // sale prices: what sellers received (p141 - p142).
 const marketRouter = require("express").Router();
 const { indexerDb } = require("../../utils/indexerDb");
+const { dailyCandles, weeklyCandles } = require("../../utils/candles");
 const { userExtractor } = require("../../middleware");
 
 // Signed-in only: the asset page names the chain accounts behind listings, and
@@ -105,23 +106,6 @@ marketRouter.get("/assets", (req, res) => {
   res.json({ total, page, pageSize, sort, assets, ...freshness(db) });
 });
 
-/** Daily OHLC candles from sales (UTC days), oldest first. */
-function dailyCandles(sales) {
-  const days = new Map();
-  for (const s of [...sales].sort((a, b) => (a.ts < b.ts ? -1 : 1))) {
-    const day = s.ts.slice(0, 10);
-    const c = days.get(day);
-    if (!c) days.set(day, { day, open: s.price, high: s.price, low: s.price, close: s.price, volume: 1 });
-    else {
-      c.high = Math.max(c.high, s.price);
-      c.low = Math.min(c.low, s.price);
-      c.close = s.price;
-      c.volume++;
-    }
-  }
-  return [...days.values()];
-}
-
 // GET /api/upland/market/asset/:category/:token -> one design: what's in escrow, and its sales
 marketRouter.get("/asset/:category/:token", (req, res) => {
   const db = indexerDb();
@@ -158,12 +142,14 @@ marketRouter.get("/asset/:category/:token", (req, res) => {
       : { trades: 0 }];
   }));
 
+  const daily = dailyCandles(real);
   res.json({
     design: { ...design, categoryLabel: CATEGORY_LABELS[design.category] || design.category },
     listed: inEscrow.filter(i => i.kind === "listing"),
     otherEscrow: inEscrow.filter(i => i.kind !== "listing"),
     sales: sales.slice(0, 300),
-    candles: dailyCandles(real),
+    candles: daily,
+    weeklyCandles: weeklyCandles(daily),
     stats,
     giveaways: sales.length - real.length,
     ...freshness(db),

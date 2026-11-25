@@ -3,8 +3,18 @@ const params = new URLSearchParams(location.search);
 const category = params.get('c') || '';
 const tokenName = params.get('t') || '';
 
+// Weekly candles by default (Fyscher, 2026-11-24); the toggle switches to daily.
+const chartView = { interval: 'week', data: null, chart: null, obs: null };
+
 function drawChart(candles) {
   const el = mk.$('as-chart');
+  if (chartView.chart) {
+    chartView.obs.disconnect();
+    chartView.chart.remove();
+    chartView.chart = null;
+  }
+  el.innerHTML = '';
+  el.style.minHeight = '';
   if (!candles.length || typeof LightweightCharts === 'undefined') {
     el.innerHTML = '<p class="market-note" style="padding:2rem 0;text-align:center">No sales in the history we have yet.</p>';
     el.style.minHeight = '0';
@@ -25,7 +35,29 @@ function drawChart(candles) {
   chart.priceScale('vol').applyOptions({ scaleMargins: { top: 0.8, bottom: 0 } });
   volume.setData(candles.map(c => ({ time: c.day, value: c.volume })));
   chart.timeScale().fitContent();
-  new ResizeObserver(() => chart.applyOptions({ width: el.clientWidth })).observe(el);
+  chartView.chart = chart;
+  chartView.obs = new ResizeObserver(() => chart.applyOptions({ width: el.clientWidth }));
+  chartView.obs.observe(el);
+}
+
+function showChart() {
+  const d = chartView.data;
+  const weekly = chartView.interval === 'week';
+  const candles = weekly ? d.weeklyCandles : d.candles;
+  for (const b of document.querySelectorAll('[data-interval]')) b.classList.toggle('active', b.dataset.interval === chartView.interval);
+  mk.$('as-chart-days').textContent = `${candles.length} ${weekly ? 'week' : 'day'}${candles.length === 1 ? '' : 's'}`;
+  mk.$('as-chart-note').textContent = d.salesFrom
+    ? `${weekly ? 'Weekly (Monday to Sunday, UTC)' : 'Daily'} open, high, low and close of what sellers received, with the number of sales underneath (1 UPX giveaways left out). History starts ${mk.day(d.salesFrom)}.`
+    : '';
+  drawChart(candles);
+}
+
+for (const b of document.querySelectorAll('[data-interval]')) {
+  b.addEventListener('click', () => {
+    if (!chartView.data || chartView.interval === b.dataset.interval) return;
+    chartView.interval = b.dataset.interval;
+    showChart();
+  });
 }
 
 function render(d) {
@@ -102,12 +134,9 @@ function render(d) {
       </tr>`).join('')
     : '<tr class="table-empty"><td colspan="4">No sales in the history we have yet</td></tr>';
 
-  mk.$('as-chart-days').textContent = `${d.candles.length} days`;
-  mk.$('as-chart-note').textContent = d.salesFrom
-    ? `Daily open, high, low and close of what sellers received, with the number of sales underneath (1 UPX giveaways left out). History starts ${mk.day(d.salesFrom)}.`
-    : '';
   mk.$('as-content').classList.remove('hidden');
-  drawChart(d.candles);
+  chartView.data = d;
+  showChart();
 }
 
 (async () => {

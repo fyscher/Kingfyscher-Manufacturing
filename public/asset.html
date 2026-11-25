@@ -42,7 +42,16 @@
       <div class="asset-grid">
         <div>
           <div class="card" style="margin-bottom:1.25rem">
-            <div class="card-header"><h3 class="card-title">Sale prices by day</h3><span class="badge" id="as-chart-days">0 days</span></div>
+            <div class="card-header">
+              <h3 class="card-title">Sale prices</h3>
+              <div style="display:flex;gap:0.5rem;align-items:center">
+                <div class="view-toggle" role="group" aria-label="Candle size">
+                  <button type="button" class="btn btn--ghost btn--sm" data-interval="week">Weekly</button>
+                  <button type="button" class="btn btn--ghost btn--sm" data-interval="day">Daily</button>
+                </div>
+                <span class="badge" id="as-chart-days">0 weeks</span>
+              </div>
+            </div>
             <div class="card-body">
               <div id="as-chart"></div>
               <p class="market-note" id="as-chart-note" style="margin-top:0.5rem"></p>

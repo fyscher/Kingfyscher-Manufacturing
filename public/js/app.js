@@ -1221,12 +1221,21 @@ function maShowCoverage(afterEl, text) {
   el.textContent = text || '';
 }
 
+// The Monday (UTC) of a "YYYY-MM-DD" day, where weekly candles start (utils/candles.js).
+function maWeekStart(day) {
+  const d = new Date(`${day}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() - ((d.getUTCDay() + 6) % 7));
+  return d.toISOString().slice(0, 10);
+}
+
 /* ── Map Assets: Load chart for the chosen asset ─────────────
-   Daily candles of what sellers received, from the indexer (1 UPX giveaways
-   left out), cut to the chosen period. */
+   Weekly candles by default (daily on request) of what sellers received, from
+   the indexer (1 UPX giveaways left out), cut to the chosen period: whole
+   weeks, so the first can start up to 6 days before it. */
 async function loadMaChart() {
   const asset = maState.asset;
   const days  = Number($('ma-period').value);
+  const weekly = $('ma-interval').value === 'week';
   if (!asset) return;
 
   const placeholder = $('ma-chart-placeholder');
@@ -1248,7 +1257,8 @@ async function loadMaChart() {
     const name = data.design.display_name || data.design.token_name;
     if (!maSearch.value) maSearch.value = name;
     const since = new Date(Date.now() - days * 86_400_000).toISOString().slice(0, 10);
-    buildMaChart(data.candles.filter(c => c.day >= since).map(c => ({ time: c.day, open: c.open, high: c.high, low: c.low, close: c.close })));
+    const candles = weekly ? data.weeklyCandles.filter(c => c.day >= maWeekStart(since)) : data.candles.filter(c => c.day >= since);
+    buildMaChart(candles.map(c => ({ time: c.day, open: c.open, high: c.high, low: c.low, close: c.close })));
 
     const st = data.stats[days] || { trades: 0 };
     const history = data.salesFrom ? `Sales history since ${new Date(data.salesFrom).toLocaleDateString(undefined, { dateStyle: 'medium' })}` : '';
@@ -1259,7 +1269,7 @@ async function loadMaChart() {
       $('ma-stat-max').textContent    = maFmtUpx(st.max);
       $('ma-stat-trades').textContent = st.trades;
       chartStats.classList.remove('hidden');
-      maShowCoverage(chartStats, `${name}, last ${days} days. ${history}${gifts}.`);
+      maShowCoverage(chartStats, `${name}, last ${days} days, ${weekly ? 'weekly candles (Monday to Sunday, UTC)' : 'daily candles'}. ${history}${gifts}.`);
     } else {
       placeholder.style.display = 'flex';
       chartMsg.textContent      = `No sales of "${name}" in the last ${days} days. ${history}.`;
@@ -1272,6 +1282,7 @@ async function loadMaChart() {
 
 /* ── Map Assets: Chart controls ─────────────────────────── */
 $('ma-period').addEventListener('change', loadMaChart);
+$('ma-interval').addEventListener('change', loadMaChart);
 $('map-assets-refresh').addEventListener('click', () => { if (maState.asset) loadMaChart(); });
 
 /* ── Collection Optimizer ───────────────────────────────── */

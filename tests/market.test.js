@@ -112,6 +112,13 @@ describe("GET /api/upland/market", () => {
     assert.deepStrictEqual([bench.listed, bench.escrow, bench.sales_30d, bench.median_30d, bench.floor_30d, bench.last_price], [2, 5, 3, 120, 100, 120]);
   });
 
+  test("one design: weekly candles start on Mondays (the charts' default)", async () => {
+    const r = await get("/api/upland/market/asset/outdoordecor/bench").expect(200);
+    // The two sales 20 days ago and the one 3 days ago always fall in different weeks.
+    assert.deepStrictEqual(r.body.weeklyCandles.map(c => [c.open, c.high, c.low, c.close, c.volume]), [[100, 140, 100, 140, 2], [120, 120, 120, 120, 1]]);
+    for (const c of r.body.weeklyCandles) assert.strictEqual(new Date(`${c.day}T00:00:00Z`).getUTCDay(), 1, `${c.day} is a Monday`);
+  });
+
   test("one design: listings with seller and time, other escrow, sales and daily candles", async () => {
     const r = await get("/api/upland/market/asset/outdoordecor/bench").expect(200);
     assert.deepStrictEqual(r.body.listed.map(i => [i.serial, i.seller]), [[1, "alice"], [2, "bob"]], "newest listing first");
