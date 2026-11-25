@@ -76,7 +76,7 @@ const PriceChart = (() => {
       layout: { background: { color: background }, textColor: '#94a3b8' },
       grid: { vertLines: { color: '#1c1c30' }, horzLines: { color: '#1c1c30' } },
       rightPriceScale: { borderColor: '#1c1c30', scaleMargins: { top: 0.08, bottom: 0.24 } },
-      leftPriceScale: { visible: hasListed, borderColor: '#1c1c30', scaleMargins: { top: 0.08, bottom: 0.24 } },
+      leftPriceScale: { visible: hasListed, borderColor: '#1c1c30', scaleMargins: { top: 0.08, bottom: 0 } },
       timeScale: { borderColor: '#1c1c30', timeVisible: false },
       crosshair: { mode: 1 },
     });
@@ -95,7 +95,12 @@ const PriceChart = (() => {
     chart.addLineSeries({ ...quiet, color: COLORS.average, lineWidth: 2 })
       .setData(points.filter(p => p.avg != null).map(p => ({ time: p.time, value: p.avg })));
     if (hasListed) {
-      chart.addLineSeries({ color: COLORS.listed, lineWidth: 1, priceScaleId: 'left', priceLineVisible: false, priceFormat: { type: 'volume' } })
+      // A count never goes below zero: start the left axis there.
+      const fromZero = range => (range ? { ...range, priceRange: { ...range.priceRange, minValue: 0 } } : range);
+      chart.addLineSeries({
+        color: COLORS.listed, lineWidth: 1, priceScaleId: 'left', priceLineVisible: false, priceFormat: { type: 'volume' },
+        autoscaleInfoProvider: original => fromZero(original()),
+      })
         .setData(listed.map(p => ({ time: p.time, value: p.listed })));
     }
     const volume = chart.addHistogramSeries({ ...quiet, priceScaleId: 'vol', color: COLORS.volume, priceFormat: { type: 'volume' } });
