@@ -42,7 +42,27 @@
       <div class="asset-grid">
         <div>
           <div class="card" style="margin-bottom:1.25rem">
-            <div class="card-header"><h3 class="card-title">Sale prices by day</h3><span class="badge" id="as-chart-days">0 days</span></div>
+            <div class="card-header" style="flex-wrap:wrap;gap:0.5rem">
+              <h3 class="card-title">Sale prices</h3>
+              <div style="display:flex;gap:0.75rem;align-items:center;flex-wrap:wrap">
+                <div class="view-toggle" role="group" aria-label="Chart">
+                  <button type="button" class="btn btn--ghost btn--sm" data-chart="view" data-value="median">Median</button>
+                  <button type="button" class="btn btn--ghost btn--sm" data-chart="view" data-value="candles">Candles</button>
+                </div>
+                <div class="view-toggle" role="group" aria-label="Each point is a">
+                  <button type="button" class="btn btn--ghost btn--sm" data-chart="interval" data-value="day">Daily</button>
+                  <button type="button" class="btn btn--ghost btn--sm" data-chart="interval" data-value="week">Weekly</button>
+                  <button type="button" class="btn btn--ghost btn--sm" data-chart="interval" data-value="month">Monthly</button>
+                </div>
+                <div class="view-toggle" role="group" aria-label="Period">
+                  <button type="button" class="btn btn--ghost btn--sm" data-chart="range" data-value="91">3M</button>
+                  <button type="button" class="btn btn--ghost btn--sm" data-chart="range" data-value="182">6M</button>
+                  <button type="button" class="btn btn--ghost btn--sm" data-chart="range" data-value="365">1Y</button>
+                  <button type="button" class="btn btn--ghost btn--sm" data-chart="range" data-value="0">All</button>
+                </div>
+                <span class="badge" id="as-chart-days">0 weeks</span>
+              </div>
+            </div>
             <div class="card-body">
               <div id="as-chart"></div>
               <p class="market-note" id="as-chart-note" style="margin-top:0.5rem"></p>
@@ -94,6 +114,7 @@
     </div>
   </main>
   <script src="/js/market-common.js"></script>
+  <script src="/js/price-chart.js"></script>
   <script src="/js/asset.js"></script>
 </body>
 </html>

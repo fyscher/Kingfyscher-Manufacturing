@@ -201,6 +201,7 @@ CREATE INDEX IF NOT EXISTS listings_upx ON listings_current (price_upx);
 CREATE INDEX IF NOT EXISTS listings_city_usd ON listings_current (city_id, price_fiat);
 CREATE INDEX IF NOT EXISTS nft_items_escrow ON nft_items (category, token_name) WHERE in_escrow = 1;
 CREATE INDEX IF NOT EXISTS nft_items_structure ON nft_items (token_name) WHERE category = 'structure';
+CREATE INDEX IF NOT EXISTS nft_items_design ON nft_items (category, token_name);
 CREATE INDEX IF NOT EXISTS property_buildings_property ON property_buildings (property_id);
 CREATE INDEX IF NOT EXISTS property_buildings_type ON property_buildings (token_name, city_id);
 CREATE INDEX IF NOT EXISTS escrow_events_dgood ON nft_escrow_events (dgood_id, block_num);

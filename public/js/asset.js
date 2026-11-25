@@ -3,29 +3,49 @@ const params = new URLSearchParams(location.search);
 const category = params.get('c') || '';
 const tokenName = params.get('t') || '';
 
-function drawChart(candles) {
+// The weekly median over all history by default (Fyscher, 2026-11-24); the
+// buttons switch to candles, daily or monthly points, and a shorter period.
+const chartView = { view: 'median', interval: 'week', range: 0, data: null, handle: null };
+
+function drawChart(points, listed) {
   const el = mk.$('as-chart');
-  if (!candles.length || typeof LightweightCharts === 'undefined') {
-    el.innerHTML = '<p class="market-note" style="padding:2rem 0;text-align:center">No sales in the history we have yet.</p>';
+  if (chartView.handle) {
+    chartView.handle.remove();
+    chartView.handle = null;
+  }
+  el.innerHTML = '';
+  el.style.minHeight = '';
+  if (!points.length || typeof LightweightCharts === 'undefined') {
+    el.innerHTML = '<p class="market-note" style="padding:2rem 0;text-align:center">No sales in this period of the history we have.</p>';
     el.style.minHeight = '0';
     return;
   }
-  const chart = LightweightCharts.createChart(el, {
-    height: 340,
-    layout: { background: { color: 'transparent' }, textColor: '#94a3b8' },
-    grid: { vertLines: { color: '#1c1c30' }, horzLines: { color: '#1c1c30' } },
-    rightPriceScale: { borderColor: '#1c1c30' },
-    timeScale: { borderColor: '#1c1c30' },
+  chartView.handle = PriceChart.draw(el, points, { view: chartView.view, interval: chartView.interval, listed, height: 340 });
+}
+
+function showChart() {
+  const d = chartView.data;
+  const { view, interval, range } = chartView;
+  const points = PriceChart.within(d.series[interval], interval, range);
+  for (const b of document.querySelectorAll('[data-chart]')) b.classList.toggle('active', String(chartView[b.dataset.chart]) === b.dataset.value);
+  mk.$('as-chart-days').textContent = PriceChart.count(points.length, interval);
+  const left = [
+    d.giveaways ? `${d.giveaways} giveaway${d.giveaways === 1 ? '' : 's'} at 1 UPX` : null,
+    d.outliers ? `${d.outliers} sale${d.outliers === 1 ? '' : 's'} far off the price around ${d.outliers === 1 ? 'it' : 'them'} (gifts, dumps, one-off trades)` : null,
+  ].filter(Boolean);
+  mk.$('as-chart-note').textContent = d.salesFrom
+    ? `${PriceChart.describe(view, interval)}${left.length ? ` Left out: ${left.join(' and ')}.` : ''} Sales history starts ${mk.day(d.salesFrom)}${d.listedFrom ? `; listings made before ${mk.day(d.listedFrom)} aren't seen, so the for-sale line can start low` : ''}.`
+    : '';
+  drawChart(points, PriceChart.within(d.listedSeries[interval], interval, range));
+}
+
+for (const b of document.querySelectorAll('[data-chart]')) {
+  b.addEventListener('click', () => {
+    if (!chartView.data) return;
+    const key = b.dataset.chart;
+    chartView[key] = key === 'range' ? Number(b.dataset.value) : b.dataset.value;
+    showChart();
   });
-  const series = chart.addCandlestickSeries({
-    upColor: '#10b981', downColor: '#ef4444', borderVisible: false, wickUpColor: '#10b981', wickDownColor: '#ef4444',
-  });
-  series.setData(candles.map(c => ({ time: c.day, open: c.open, high: c.high, low: c.low, close: c.close })));
-  const volume = chart.addHistogramSeries({ priceScaleId: 'vol', color: 'rgba(124, 58, 237, 0.35)', priceFormat: { type: 'volume' } });
-  chart.priceScale('vol').applyOptions({ scaleMargins: { top: 0.8, bottom: 0 } });
-  volume.setData(candles.map(c => ({ time: c.day, value: c.volume })));
-  chart.timeScale().fitContent();
-  new ResizeObserver(() => chart.applyOptions({ width: el.clientWidth })).observe(el);
 }
 
 function render(d) {
@@ -102,12 +122,9 @@ function render(d) {
       </tr>`).join('')
     : '<tr class="table-empty"><td colspan="4">No sales in the history we have yet</td></tr>';
 
-  mk.$('as-chart-days').textContent = `${d.candles.length} days`;
-  mk.$('as-chart-note').textContent = d.salesFrom
-    ? `Daily open, high, low and close of what sellers received, with the number of sales underneath (1 UPX giveaways left out). History starts ${mk.day(d.salesFrom)}.`
-    : '';
   mk.$('as-content').classList.remove('hidden');
-  drawChart(d.candles);
+  chartView.data = d;
+  showChart();
 }
 
 (async () => {
